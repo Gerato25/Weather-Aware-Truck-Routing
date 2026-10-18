@@ -35,6 +35,10 @@ function describeError(status: number, body: unknown): string {
     }
     if (parts.length) return parts.join(' · ')
   }
+  // Vite's proxy returns an empty 502 when Django is not listening on :8000.
+  if (status === 502 || status === 503 || status === 504) {
+    return 'Cannot reach the planning API. Is the backend running?'
+  }
   return `Request failed with status ${status}`
 }
 
