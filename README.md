@@ -59,21 +59,19 @@ The Django process is **stateless** (no database). Forecasts are cached in memor
 Requires Python 3.13+ and Node 20+.
 
 ```powershell
-# 1. Backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-copy backend\.env.example backend\.env   # optional
-python backend\manage.py test trucking
-python backend\manage.py runserver 127.0.0.1:8000
+# Terminal 1 — backend
+cd backend
+python manage.py runserver
 
-# 2. Frontend (second terminal)
+# Terminal 2 — frontend
 cd frontend
 npm install
 npm run dev
 ```
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api` to Django.
+
+The first `python manage.py runserver` creates `.venv` and installs Django if needed. After that it is just that one command, same idea as `npm run dev`.
 
 Optional: set `OPENROUTESERVICE_API_KEY` in `backend/.env` for truck-legal routing. Free key: [openrouteservice.org/dev](https://openrouteservice.org/dev/#/signup).
 
@@ -82,7 +80,8 @@ Optional: set `OPENROUTESERVICE_API_KEY` in `backend/.env` for truck-legal routi
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe backend\manage.py test trucking
+cd backend
+python manage.py test trucking
 ```
 
 81 tests cover band edges, load-rule escalation, ETA interpolation, mileage rollups, ranking ties, corridor expansion, and API validation. They do not hit the network.
