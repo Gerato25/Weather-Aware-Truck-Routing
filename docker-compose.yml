@@ -1,0 +1,12 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_DEBUG: "False"
+      DJANGO_SECRET_KEY: local-docker-not-for-production
+      DJANGO_ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "True"
+      # Uncomment and paste a key for truck-profile routing:
+      # OPENROUTESERVICE_API_KEY: ""

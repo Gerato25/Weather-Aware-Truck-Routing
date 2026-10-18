@@ -1,0 +1,24 @@
+# Render Blueprint: one web service that serves the API and the built UI.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: weather-aware-truck-routing
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health/
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: .onrender.com
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: "True"
+      - key: USER_AGENT
+        value: weather-aware-truck-routing/1.0 (https://github.com/)
+      # Optional. Leave empty to use the public OSRM fallback (car profile).
+      # Free key: https://openrouteservice.org/dev/#/signup
+      - key: OPENROUTESERVICE_API_KEY
+        sync: false
