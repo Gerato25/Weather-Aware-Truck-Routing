@@ -141,6 +141,9 @@ interface MapViewProps {
   heatHour: number
   heatLayers: HeatLayers
   focused: CheckpointRef | null
+  basemap?: 'map' | 'satellite'
+  hideEmpty?: boolean
+  worldView?: boolean
   onSelectRoute: (routeId: string) => void
   onFocusCheckpoint: (ref: CheckpointRef | null) => void
 }
@@ -488,6 +491,9 @@ export function MapView({
   heatHour,
   heatLayers,
   focused,
+  basemap = 'map',
+  hideEmpty = false,
+  worldView = false,
   onSelectRoute,
   onFocusCheckpoint,
 }: MapViewProps) {
@@ -536,8 +542,8 @@ export function MapView({
     const map = new MapLibreMap({
       container: containerRef.current,
       style: MAP_STYLES[theme],
-      center: [-96, 39],
-      zoom: 3.4,
+      center: worldView ? [10, 18] : [-96, 39],
+      zoom: worldView ? 1.55 : 3.4,
       attributionControl: false,
       maxCanvasSize: [8192, 8192],
       // Keeps long routes legible instead of wrapping across the antimeridian.
@@ -549,7 +555,7 @@ export function MapView({
     observer.observe(containerRef.current)
     requestAnimationFrame(resize)
 
-    map.addControl(new NavigationControl({ showCompass: false }), 'top-left')
+    map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
     map.addControl(new ScaleControl({ unit: 'imperial' }), 'bottom-left')
     map.addControl(
       new AttributionControl({
@@ -590,7 +596,7 @@ export function MapView({
       mapRef.current = null
       setReady(false)
     }
-  }, [theme])
+  }, [theme, worldView])
 
   // --- data updates -------------------------------------------------------
   useEffect(() => {
@@ -631,6 +637,36 @@ export function MapView({
       map.setLayoutProperty(layerId, 'visibility', heatLayers[metric] ? 'visible' : 'none')
     }
   }, [ready, heatLayers])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+
+    const sourceId = 'satellite'
+    const layerId = 'satellite-raster'
+    if (basemap === 'satellite') {
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, {
+          type: 'raster',
+          tiles: [
+            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          ],
+          tileSize: 256,
+          attribution: 'Tiles &copy; Esri',
+        })
+      }
+      if (!map.getLayer(layerId)) {
+        const before = map.getLayer(LAYERS.routeCasing) ? LAYERS.routeCasing : undefined
+        map.addLayer(
+          { id: layerId, type: 'raster', source: sourceId, minzoom: 0, maxzoom: 19 },
+          before,
+        )
+      }
+      map.setLayoutProperty(layerId, 'visibility', 'visible')
+      return
+    }
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }, [ready, basemap])
 
   // --- camera -------------------------------------------------------------
   const fitKey = useMemo(
@@ -677,7 +713,7 @@ export function MapView({
           <p>Map tiles failed to load: {mapError}</p>
         </div>
       )}
-      {!routes.length && !mapError && (
+      {!hideEmpty && !routes.length && !mapError && (
         <div className="map-empty">
           <p className="map-empty-kicker">Plan a trip</p>
           <p>Set origin, destination, departure and load to draw routes and the weather heatmap.</p>

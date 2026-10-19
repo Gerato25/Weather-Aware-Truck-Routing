@@ -1,21 +1,22 @@
 import { useState } from 'react'
 
-import { RISK_COLORS, RISK_LABELS, RISK_LEVELS } from '../lib/risk'
+import { RISK_COLORS, RISK_LABELS, RISK_LEVELS, RISK_THRESHOLDS } from '../lib/risk'
 
-const THRESHOLDS: Record<string, [string, string, string]> = {
-  LOW: ['< 25', '< 0.10', '< 0.5'],
-  MODERATE: ['25-34', '0.10-0.25', '0.5-1.0'],
-  HIGH: ['35-44', '0.25-0.50', '1.0-2.0'],
-  SEVERE: ['45-54', '0.50-1.00', '2.0-3.0'],
-  NO_TRAVEL: ['≥ 55', '> 1.00', '> 3.0'],
+interface RiskLegendProps {
+  title?: string
+  placement?: 'top' | 'bottom'
 }
 
-export function RiskLegend() {
+export function RiskLegend({ title, placement = 'top' }: RiskLegendProps) {
   const [open, setOpen] = useState(false)
+  const classes = ['legend', placement === 'bottom' ? 'bottom' : '', open ? 'open' : '']
+    .filter(Boolean)
+    .join(' ')
 
   return (
-    <div className={open ? 'legend open' : 'legend'}>
+    <div className={classes}>
       <div className="legend-pills">
+        {title && <span className="legend-title">{title}</span>}
         {RISK_LEVELS.map((level) => (
           <span key={level} className="legend-pill">
             <i className="dot" style={{ background: RISK_COLORS[level] }} />
@@ -45,9 +46,9 @@ export function RiskLegend() {
                     <span className="dot" style={{ background: RISK_COLORS[level] }} />
                     {RISK_LABELS[level]}
                   </th>
-                  {THRESHOLDS[level].map((cell) => (
-                    <td key={cell}>{cell}</td>
-                  ))}
+                  <td>{RISK_THRESHOLDS[level].wind}</td>
+                  <td>{RISK_THRESHOLDS[level].rain}</td>
+                  <td>{RISK_THRESHOLDS[level].snow}</td>
                 </tr>
               ))}
             </tbody>

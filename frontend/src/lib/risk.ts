@@ -18,14 +18,30 @@ export const RISK_LABELS: Record<RiskLevelSlug, string> = {
   NO_TRAVEL: 'No Travel',
 }
 
+/** Printed table bands, including the shared rain/snow endpoints. */
+export const RISK_THRESHOLDS: Record<RiskLevelSlug, { wind: string; rain: string; snow: string }> = {
+  LOW: { wind: '< 25', rain: '< 0.10', snow: '< 0.5' },
+  MODERATE: { wind: '25–34', rain: '0.10–0.25', snow: '0.5–1.0' },
+  HIGH: { wind: '35–44', rain: '0.25–0.50', snow: '1.0–2.0' },
+  SEVERE: { wind: '45–54', rain: '0.50–1.00', snow: '2.0–3.0' },
+  NO_TRAVEL: { wind: '≥ 55', rain: '> 1.00', snow: '> 3.0' },
+}
+
 export function riskColor(level: RiskLevelSlug): string {
   return RISK_COLORS[level] ?? RISK_COLORS.LOW
 }
 
+function scoreIndex(score: number): number {
+  return Math.max(0, Math.min(RISK_LEVELS.length - 1, Math.round(score)))
+}
+
 /** Colour for a continuous average-risk score (0 = Low ... 4 = No Travel). */
 export function scoreColor(score: number): string {
-  const index = Math.max(0, Math.min(RISK_LEVELS.length - 1, Math.round(score)))
-  return RISK_COLORS[RISK_LEVELS[index]]
+  return RISK_COLORS[RISK_LEVELS[scoreIndex(score)]]
+}
+
+export function scoreLabel(score: number): string {
+  return RISK_LABELS[RISK_LEVELS[scoreIndex(score)]]
 }
 
 /** Route line colours, kept distinct from the risk palette to avoid confusion. */
@@ -44,6 +60,13 @@ export type HeatLayers = Record<HeatMetric, boolean>
 
 export const DEFAULT_HEAT_LAYERS: HeatLayers = {
   risk: true,
+  wind: false,
+  rain: false,
+  snow: false,
+}
+
+export const HIDDEN_HEAT_LAYERS: HeatLayers = {
+  risk: false,
   wind: false,
   rain: false,
   snow: false,

@@ -1,4 +1,4 @@
-import { HEAT_METRICS, HEAT_LAYER_KEYS, type HeatLayers, type HeatMetric } from '../lib/risk'
+import { HEAT_LAYER_KEYS, type HeatLayers, type HeatMetric } from '../lib/risk'
 
 interface MapLayersProps {
   layers: HeatLayers
@@ -8,25 +8,25 @@ interface MapLayersProps {
 
 const LABELS: Record<HeatMetric, string> = {
   risk: 'Weather Heatmap',
-  wind: HEAT_METRICS.wind.label,
-  rain: HEAT_METRICS.rain.label,
-  snow: HEAT_METRICS.snow.label,
+  wind: 'Wind',
+  rain: 'Rain',
+  snow: 'Snow',
 }
 
 export function MapLayers({ layers, disabled, onToggle }: MapLayersProps) {
   return (
-    <div className="map-layers">
-      <span>Layers</span>
+    <div className="layer-pills" role="group" aria-label="Weather layers">
       {HEAT_LAYER_KEYS.map((key) => (
-        <label key={key} className="toggle-row">
-          <input
-            type="checkbox"
-            checked={layers[key]}
-            disabled={disabled}
-            onChange={(event) => onToggle(key, event.target.checked)}
-          />
-          <span>{LABELS[key]}</span>
-        </label>
+        <button
+          key={key}
+          type="button"
+          className={layers[key] ? 'layer-pill active' : 'layer-pill'}
+          disabled={disabled}
+          aria-pressed={layers[key]}
+          onClick={() => onToggle(key, !layers[key])}
+        >
+          {LABELS[key]}
+        </button>
       ))}
     </div>
   )

@@ -69,7 +69,7 @@ npm install
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api` to Django.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) for the home page, then **Trip Planner** (`/plan`) to search and see the three scored corridors on the same page. Vite proxies `/api` to Django.
 
 The first `python manage.py runserver` creates `.venv` and installs Django if needed. After that it is just that one command, same idea as `npm run dev`.
 

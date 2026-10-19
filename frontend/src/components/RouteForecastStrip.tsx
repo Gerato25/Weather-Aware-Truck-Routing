@@ -21,26 +21,11 @@ export function RouteForecastStrip({
   onFocus,
 }: RouteForecastStripProps) {
   const cards = sampleCheckpoints(route.checkpoints, 6)
-  const activeIndex = Math.max(
-    0,
-    cards.findIndex((cp) => focused?.routeId === route.id && focused.index === cp.index),
-  )
 
   return (
     <section className="forecast-strip">
       <header className="forecast-strip-head">
         <h2>Weather Forecast Along Route</h2>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(0, cards.length - 1)}
-          value={activeIndex === -1 ? 0 : activeIndex}
-          aria-label="Checkpoint along route"
-          onChange={(event) => {
-            const next = cards[Number(event.target.value)]
-            if (next) onFocus({ routeId: route.id, index: next.index })
-          }}
-        />
       </header>
       <div className="forecast-cards">
         {cards.map((cp, index) => {
@@ -74,12 +59,6 @@ export function RouteForecastStrip({
                 Wind {Math.round(cp.weather.wind_mph)} mph
                 <br />
                 Rain {cp.weather.rain_in_hr.toFixed(2)} in/hr
-                {cp.weather.snow_in_hr > 0 && (
-                  <>
-                    <br />
-                    Snow {cp.weather.snow_in_hr.toFixed(1)} in/hr
-                  </>
-                )}
               </span>
               <span className="forecast-risk">{cp.risk.label}</span>
             </button>

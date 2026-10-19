@@ -20,7 +20,7 @@ export function routeWeatherStats(route: Route): RouteWeatherStats {
 /** Unique roles matching the dispatch-card pattern: best / faster / safer. */
 export function routeRoles(plan: PlanResponse): Record<string, string> {
   const roles: Record<string, string> = {}
-  roles[plan.recommendation.route_id] = 'Best Overall'
+  roles[plan.recommendation.route_id] = 'Balanced'
 
   const others = plan.routes.filter((route) => route.id !== plan.recommendation.route_id)
   const fastest = [...others].sort((a, b) => a.summary.duration_hours - b.summary.duration_hours)[0]
@@ -39,14 +39,16 @@ export function routeRoles(plan: PlanResponse): Record<string, string> {
 
 export function routeBadge(role: string, blocked: boolean): { label: string; tone: string } {
   if (blocked) return { label: 'No Travel', tone: 'blocked' }
-  if (role === 'Best Overall') return { label: 'SAFEST', tone: 'safest' }
+  if (role === 'Balanced' || role === 'Best Overall') return { label: 'Recommended', tone: 'safest' }
   if (role === 'Safer Weather') return { label: 'Very Good', tone: 'good' }
   if (role === 'Faster') return { label: 'Good', tone: 'ok' }
   return { label: 'Alternate', tone: 'ok' }
 }
 
 export function routeBlurb(role: string, reasons: string[]): string {
-  if (role === 'Best Overall') return reasons[0] ?? 'Best balance of weather risk and travel time.'
+  if (role === 'Balanced' || role === 'Best Overall') {
+    return reasons[0] ?? 'Best balance of weather risk and travel time.'
+  }
   if (role === 'Faster') return 'Slightly higher weather risk, but faster.'
   if (role === 'Safer Weather') return 'Lowest weather risk, but longer travel time.'
   return reasons[0] ?? ''
