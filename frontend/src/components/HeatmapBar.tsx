@@ -3,18 +3,19 @@ import { useMemo } from 'react'
 import type { CorridorResponse } from '../types'
 
 interface HeatmapBarProps {
-  corridor: CorridorResponse | null
-  loading: boolean
+  corridor?: CorridorResponse | null
+  loading?: boolean
   hour: number
   onHourChange: (hour: number) => void
 }
 
-export function HeatmapBar({ corridor, loading, hour, onHourChange }: HeatmapBarProps) {
+export function HeatmapBar({ corridor, loading = false, hour, onHourChange }: HeatmapBarProps) {
   const maxHour = corridor ? Math.max(0, corridor.hours.length - 1) : 48
+  const fill = maxHour === 0 ? 0 : (Math.min(hour, maxHour) / maxHour) * 100
 
   const timestamp = useMemo(() => {
-    if (!corridor?.hours[hour]) return null
-    return new Date(corridor.hours[hour])
+    if (corridor?.hours[hour]) return new Date(corridor.hours[hour])
+    return new Date(Date.now() + hour * 3_600_000)
   }, [corridor, hour])
 
   return (
@@ -32,8 +33,10 @@ export function HeatmapBar({ corridor, loading, hour, onHourChange }: HeatmapBar
         step={1}
         value={Math.min(hour, maxHour)}
         onChange={(event) => onHourChange(Number(event.target.value))}
-        disabled={!corridor}
         aria-label="Forecast hour offset from departure"
+        style={{
+          background: `linear-gradient(to right, var(--accent) ${fill}%, var(--surface-3) ${fill}%)`,
+        }}
       />
 
       <div className="heat-readout">

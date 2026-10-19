@@ -1,26 +1,73 @@
 import { useState } from 'react'
 
-import { RISK_COLORS, RISK_LABELS, RISK_LEVELS, RISK_THRESHOLDS } from '../lib/risk'
+import {
+  HEAT_LAYER_KEYS,
+  RISK_COLORS,
+  RISK_LABELS,
+  RISK_LEVELS,
+  RISK_THRESHOLDS,
+  type HeatLayers,
+  type HeatMetric,
+} from '../lib/risk'
 
 interface RiskLegendProps {
   title?: string
   placement?: 'top' | 'bottom'
+  overlay?: HeatLayers
 }
 
-export function RiskLegend({ title, placement = 'top' }: RiskLegendProps) {
+const OVERLAY_SCALES: Record<HeatMetric, { color: string; label: string }[]> = {
+  risk: [
+    { color: '#22c55e', label: 'Cool' },
+    { color: '#86efac', label: 'Mild' },
+    { color: '#facc15', label: 'Warm' },
+    { color: '#fb923c', label: 'Hot' },
+    { color: '#ef4444', label: 'Extreme' },
+  ],
+  wind: [
+    { color: '#bae6fd', label: 'Calm' },
+    { color: '#38bdf8', label: 'Breezy' },
+    { color: '#2563eb', label: 'Strong' },
+  ],
+  rain: [
+    { color: '#99f6e4', label: 'Light' },
+    { color: '#14b8a6', label: 'Moderate' },
+    { color: '#0f766e', label: 'Heavy' },
+  ],
+  snow: [
+    { color: '#e0e7ff', label: 'Flurries' },
+    { color: '#c7d2fe', label: 'Snow' },
+    { color: '#ffffff', label: 'Heavy' },
+  ],
+}
+
+const OVERLAY_TITLES: Record<HeatMetric, string> = {
+  risk: 'Temperature',
+  wind: 'Wind',
+  rain: 'Rain',
+  snow: 'Snow',
+}
+
+export function RiskLegend({ title, placement = 'top', overlay }: RiskLegendProps) {
   const [open, setOpen] = useState(false)
   const classes = ['legend', placement === 'bottom' ? 'bottom' : '', open ? 'open' : '']
     .filter(Boolean)
     .join(' ')
+  const active = overlay ? HEAT_LAYER_KEYS.find((key) => overlay[key]) : undefined
+  const pills = active ? OVERLAY_SCALES[active] : RISK_LEVELS.map((level) => ({
+    color: RISK_COLORS[level],
+    label: RISK_LABELS[level],
+  }))
+  const heading = title ?? (active ? OVERLAY_TITLES[active] : undefined)
 
   return (
     <div className={classes}>
       <div className="legend-pills">
-        {title && <span className="legend-title">{title}</span>}
-        {RISK_LEVELS.map((level) => (
-          <span key={level} className="legend-pill">
-            <i className="dot" style={{ background: RISK_COLORS[level] }} />
-            {RISK_LABELS[level]}
+        {heading && <span className="legend-title">{heading}</span>}
+        {pills.map((pill) => (
+          <span key={pill.label} className="legend-pill">
+            <i className="dot" style={{ background: pill.color }} />
+            {pill.label}
           </span>
         ))}
         <button type="button" className="legend-more" onClick={() => setOpen(!open)}>

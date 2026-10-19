@@ -12,7 +12,7 @@ from .geo import Coord
 from .risk import RiskLevel, assess_score
 from .weather.open_meteo import OpenMeteoClient, PointForecast, snap
 
-MAX_GRID_POINTS = 72
+MAX_GRID_POINTS = 160
 DEFAULT_HOURS = 48
 # Contiguous US, used when the client has not panned yet.
 CONUS_BOUNDS = (-125.0, 24.0, -66.0, 50.0)
@@ -42,7 +42,7 @@ def _clamp_bbox(west: float, south: float, east: float, north: float) -> tuple[f
 def grid_points(west: float, south: float, east: float, north: float, max_points: int = MAX_GRID_POINTS) -> list[Coord]:
     """Even lat/lon samples across a bbox, snapped onto the weather grid."""
     west, south, east, north = _clamp_bbox(west, south, east, north)
-    cols = max(3, min(12, int(ceil(sqrt(max_points * (east - west) / max(north - south, 0.01))))))
+    cols = max(3, min(16, int(ceil(sqrt(max_points * (east - west) / max(north - south, 0.01))))))
     rows = max(3, max_points // cols)
     while cols * rows > max_points and (cols > 3 or rows > 3):
         if cols >= rows and cols > 3:

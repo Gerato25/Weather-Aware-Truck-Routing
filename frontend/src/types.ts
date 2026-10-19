@@ -108,6 +108,7 @@ export interface CorridorResponse {
   wind: number[][]
   rain: number[][]
   snow: number[][]
+  temperature?: (number | null)[][]
   max_score: number
   load_lb: number
 }

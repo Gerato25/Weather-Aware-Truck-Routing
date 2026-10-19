@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
-import { fetchWeatherMap } from '../api/client'
 import { AppHeader } from '../components/AppHeader'
 import { CheckpointList } from '../components/CheckpointList'
 import { HeatmapBar } from '../components/HeatmapBar'
-import { MapRouteLegend } from '../components/MapRouteLegend'
+import { MapLayers } from '../components/MapLayers'
 import { RequirementsPanel } from '../components/RequirementsPanel'
 import { MapView } from '../components/MapView'
 import { RiskLegend } from '../components/RiskLegend'
@@ -13,10 +12,9 @@ import { RouteForecastStrip } from '../components/RouteForecastStrip'
 import { TripForm } from '../components/TripForm'
 import type { useTripSession } from '../hooks/useTripSession'
 import type { Page } from '../lib/navigation'
-import { DEFAULT_HEAT_LAYERS } from '../lib/risk'
-import { routeBlurb, routeRoles } from '../lib/routeMeta'
+import type { HeatMetric } from '../lib/risk'
+import { corridorName, routeBlurb, routeRoles } from '../lib/routeMeta'
 import type { Theme } from '../lib/theme'
-import type { CorridorResponse } from '../types'
 
 type Session = ReturnType<typeof useTripSession>
 
@@ -27,13 +25,7 @@ interface PlannerPageProps {
   session: Session
 }
 
-const WORLD_BBOX = { west: -170, south: -48, east: 179, north: 72 }
-
 export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPageProps) {
-  const [worldHeat, setWorldHeat] = useState<CorridorResponse | null>(null)
-  const [worldHour, setWorldHour] = useState(0)
-  const [worldLoading, setWorldLoading] = useState(true)
-
   const {
     form,
     updateField,
@@ -45,43 +37,15 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
     selectedRoute,
     focused,
     setFocused,
-    corridor,
-    corridorLoading,
     heatHour,
     setHeatHour,
+    heatLayers,
+    setHeatLayers,
     selectRoute,
   } = session
 
   const roles = useMemo(() => (plan ? routeRoles(plan) : {}), [plan])
   const originWx = selectedRoute?.checkpoints[0]?.weather ?? null
-  const activeCorridor = plan ? corridor : worldHeat
-  const activeHour = plan ? heatHour : worldHour
-  const heatLoading = plan ? corridorLoading : worldLoading
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchWeatherMap({ ...WORLD_BBOX, hours: 48, load_lb: 42_000 }, controller.signal)
-      .then((data) => {
-        setWorldHeat({
-          anchor: data.anchor,
-          hours: data.hours,
-          points: data.points,
-          risk: data.risk,
-          wind: data.wind,
-          rain: data.rain,
-          snow: data.snow,
-          max_score: data.max_score,
-          load_lb: data.load_lb,
-        })
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setWorldHeat(null)
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setWorldLoading(false)
-      })
-    return () => controller.abort()
-  }, [])
 
   return (
     <div className="app">
@@ -111,25 +75,22 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
           recommendedRouteId={plan?.recommendation.route_id ?? null}
           origin={plan?.request.origin ?? null}
           destination={plan?.request.destination ?? null}
-          corridor={activeCorridor}
-          heatHour={activeHour}
-          heatLayers={DEFAULT_HEAT_LAYERS}
+          heatHour={heatHour}
+          heatLayers={heatLayers}
           focused={focused}
           hideEmpty
           worldView
           onSelectRoute={selectRoute}
           onFocusCheckpoint={setFocused}
         />
-        <RiskLegend />
-        <HeatmapBar
-          corridor={activeCorridor}
-          loading={heatLoading}
-          hour={activeHour}
-          onHourChange={plan ? setHeatHour : setWorldHour}
+        <RiskLegend overlay={heatLayers} />
+        <HeatmapBar hour={heatHour} onHourChange={setHeatHour} />
+        <MapLayers
+          layers={heatLayers}
+          onToggle={(metric: HeatMetric, visible) => {
+            setHeatLayers((current) => ({ ...current, [metric]: visible }))
+          }}
         />
-        {plan && (
-          <MapRouteLegend plan={plan} selectedRouteId={selectedRouteId} onSelect={selectRoute} />
-        )}
         {planning && (
           <div className="map-loading" role="status">
             <span className="spinner" aria-hidden="true" />
@@ -149,34 +110,46 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
       )}
 
       <aside className="inspector">
+        <button
+          type="submit"
+          form="trip-form"
+          className="primary find-route"
+          disabled={planning || form.origin.trim().length < 2 || form.destination.trim().length < 2}
+        >
+          {planning ? 'Planning…' : 'Find safest route'}
+          {!planning && <span aria-hidden="true"> →</span>}
+        </button>
+
         {plan ? (
           <>
-            <div className="setting-block compact-spacing">
-              <span>Checkpoint spacing</span>
-              <div className="segmented small" role="group" aria-label="Checkpoint spacing in miles">
-                {([10, 25, 50] as const).map((interval) => (
-                  <button
-                    type="button"
-                    key={interval}
-                    aria-pressed={form.intervalMiles === interval}
-                    className={form.intervalMiles === interval ? 'segment active' : 'segment'}
-                    onClick={() => updateField('intervalMiles', interval)}
-                  >
-                    {interval} mi
-                  </button>
-                ))}
-              </div>
-            </div>
+            <header className="inspector-head">
+              <h2>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M4 7h11M4 12h16M4 17h9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="17" cy="7" r="2.2" fill="currentColor" />
+                  <circle cx="20" cy="17" r="2.2" fill="currentColor" />
+                </svg>
+                Route Options
+              </h2>
+            </header>
             <div className="route-cards">
               {plan.routes.map((route, index) => {
-                const title = roles[route.id] ?? route.label
+                const title = corridorName(index)
+                const rank = roles[route.id] ?? route.label
                 return (
                   <RouteCard
                     key={route.id}
                     route={route}
                     index={index}
                     title={title}
-                    blurb={routeBlurb(title, plan.recommendation.reasons)}
+                    rank={rank}
+                    blurb={routeBlurb(rank, plan.recommendation.reasons)}
                     selected={route.id === selectedRouteId}
                     recommended={route.id === plan.recommendation.route_id}
                     onSelect={() => selectRoute(route.id)}

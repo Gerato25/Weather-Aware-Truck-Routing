@@ -109,6 +109,16 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000). Gunicorn serves the AP
 
 Free-tier cold starts can take a minute; the first plan after idle may wait on OSRM’s public server as well.
 
+### Host the UI on Vercel
+
+Vercel can serve the React app. It cannot run the Django API. Deploy Django on Render (or another host), then:
+
+1. In the Vercel project, set **Root Directory** to `frontend` (or use the repo-root `vercel.json`).
+2. Add env var **`VITE_API_BASE_URL`** = `https://YOUR-SERVICE.onrender.com/api` (no trailing slash).
+3. Redeploy. Vite inlines that URL at build time, so changing it later needs a new build.
+
+Visiting only the Vercel URL without that env var makes `/api` 404 (Vercel `NOT_FOUND`). Visiting a Django URL that was never given a `frontend/dist` build shows “Frontend build is missing.”
+
 ## API
 
 | Method | Path | Purpose |

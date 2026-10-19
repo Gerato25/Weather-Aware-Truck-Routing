@@ -22,7 +22,13 @@ export class ApiError extends Error {
 
 /** Pulls a readable message out of a DRF error body. */
 function describeError(status: number, body: unknown): string {
-  if (typeof body === 'string' && body.trim()) return body
+  const text = typeof body === 'string' ? body : ''
+  if (status === 404 && (/NOT_FOUND/i.test(text) || /page could not be found/i.test(text))) {
+    return 'The planning API is not on this Vercel app. Deploy Django (Render) and set VITE_API_BASE_URL to that origin, then rebuild.'
+  }
+  if (typeof body === 'string' && body.trim() && body.length < 280 && !body.trim().startsWith('<')) {
+    return body
+  }
   if (body && typeof body === 'object') {
     const record = body as Record<string, unknown>
     if (typeof record.detail === 'string') return record.detail
@@ -30,14 +36,17 @@ function describeError(status: number, body: unknown): string {
     // Field errors arrive as {"field": ["message", ...]}.
     const parts: string[] = []
     for (const [field, value] of Object.entries(record)) {
-      const text = Array.isArray(value) ? value.join(' ') : String(value)
-      parts.push(field === 'non_field_errors' ? text : `${field}: ${text}`)
+      const next = Array.isArray(value) ? value.join(' ') : String(value)
+      parts.push(field === 'non_field_errors' ? next : `${field}: ${next}`)
     }
     if (parts.length) return parts.join(' · ')
   }
   // Vite's proxy returns an empty 502 when Django is not listening on :8000.
   if (status === 502 || status === 503 || status === 504) {
     return 'Cannot reach the planning API. Is the backend running?'
+  }
+  if (status === 404) {
+    return 'The planning API returned 404. If this is a Vercel UI deploy, point VITE_API_BASE_URL at your Django host.'
   }
   return `Request failed with status ${status}`
 }
@@ -112,6 +121,7 @@ export function fetchWeatherMap(
     north: number
     hours?: number
     load_lb?: number
+    anchor?: string
   },
   signal?: AbortSignal,
 ): Promise<WeatherMapResponse> {

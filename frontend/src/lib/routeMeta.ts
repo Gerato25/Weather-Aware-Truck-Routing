@@ -17,6 +17,12 @@ export function routeWeatherStats(route: Route): RouteWeatherStats {
   }
 }
 
+const CORRIDOR_NAMES = ['Northern', 'Central', 'Southern']
+
+export function corridorName(index: number): string {
+  return CORRIDOR_NAMES[index] ?? `Option ${index + 1}`
+}
+
 /** Unique roles matching the dispatch-card pattern: best / faster / safer. */
 export function routeRoles(plan: PlanResponse): Record<string, string> {
   const roles: Record<string, string> = {}
@@ -40,9 +46,9 @@ export function routeRoles(plan: PlanResponse): Record<string, string> {
 export function routeBadge(role: string, blocked: boolean): { label: string; tone: string } {
   if (blocked) return { label: 'No Travel', tone: 'blocked' }
   if (role === 'Balanced' || role === 'Best Overall') return { label: 'Recommended', tone: 'safest' }
+  if (role === 'Faster') return { label: 'Safest', tone: 'ok' }
   if (role === 'Safer Weather') return { label: 'Very Good', tone: 'good' }
-  if (role === 'Faster') return { label: 'Good', tone: 'ok' }
-  return { label: 'Alternate', tone: 'ok' }
+  return { label: 'Very Good', tone: 'good' }
 }
 
 export function routeBlurb(role: string, reasons: string[]): string {

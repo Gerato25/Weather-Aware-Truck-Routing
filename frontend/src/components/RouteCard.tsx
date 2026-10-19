@@ -7,6 +7,7 @@ interface RouteCardProps {
   route: Route
   index: number
   title: string
+  rank?: string
   blurb: string
   selected: boolean
   recommended: boolean
@@ -17,6 +18,7 @@ export function RouteCard({
   route,
   index,
   title,
+  rank,
   blurb,
   selected,
   recommended,
@@ -26,7 +28,7 @@ export function RouteCard({
   const severe = Math.round(summary.miles_by_level.SEVERE ?? 0)
   const badge = recommended
     ? { label: 'Recommended', tone: 'safest' }
-    : routeBadge(title, summary.blocked)
+    : routeBadge(rank ?? title, summary.blocked)
   const classes = ['route-card']
   if (selected) classes.push('selected')
   if (recommended) classes.push('featured')
@@ -44,10 +46,7 @@ export function RouteCard({
         <span className="route-name">
           Route {index + 1} – {title}
         </span>
-        <div className="route-card-actions">
-          <span className={`tag tag-${badge.tone}`}>{badge.label}</span>
-          <span className="view-link">View on map →</span>
-        </div>
+        <span className={`tag tag-${badge.tone}`}>{badge.label}</span>
       </header>
 
       <div className="route-metrics">

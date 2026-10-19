@@ -64,6 +64,16 @@ export function shortPlaceName(label: string): string {
   return piece || label
 }
 
+/** City and region, e.g. "Chicago, IL" from "Chicago, IL, USA". */
+export function cityStateName(label: string): string {
+  const parts = label
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length >= 2) return `${parts[0]}, ${parts[1]}`
+  return parts[0] || label
+}
+
 /** WMO weather-code to a compact forecast label. */
 export function weatherLabel(code: number | null): string {
   if (code === null) return 'Forecast'

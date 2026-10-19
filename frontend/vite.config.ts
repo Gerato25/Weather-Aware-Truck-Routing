@@ -53,7 +53,7 @@ export default defineConfig({
   // Keep MapLibre out of the pre-bundle so its worker URL stays resolvable in
   // development even if maplibreSetup.ts is imported slightly late.
   optimizeDeps: {
-    exclude: ['maplibre-gl'],
+    exclude: ['maplibre-gl', '@openmeteo/weather-map-layer'],
   },
   build: {
     outDir: 'dist',

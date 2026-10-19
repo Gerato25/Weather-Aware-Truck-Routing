@@ -15,14 +15,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { formatClock } from '../lib/format'
 import {
+  DEFAULT_HEAT_LAYERS,
   HEAT_LAYER_KEYS,
-  HEAT_METRICS,
   RISK_COLORS,
   riskColor,
   routeColor,
   type HeatLayers,
-  type HeatMetric,
 } from '../lib/risk'
+import {
+  OM_LAYER_IDS,
+  OM_SOURCE_IDS,
+  fetchOmValidTimes,
+  omTileUrl,
+  timeStepForHour,
+} from '../lib/omWeather'
 import { MAP_STYLES, type Theme } from '../lib/theme'
 import type { Checkpoint, CorridorResponse, Place, Route } from '../types'
 
@@ -31,7 +37,6 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 const SOURCES = {
   routes: 'routes',
   checkpoints: 'checkpoints',
-  corridor: 'corridor',
   endpoints: 'endpoints',
 } as const
 
@@ -43,78 +48,6 @@ const LAYERS = {
   endpointDot: 'endpoint-dot',
   endpointLabel: 'endpoint-label',
 } as const
-
-const HEAT_LAYER_IDS: Record<HeatMetric, string> = {
-  risk: 'corridor-heat-risk',
-  wind: 'corridor-heat-wind',
-  rain: 'corridor-heat-rain',
-  snow: 'corridor-heat-snow',
-}
-
-const HEAT_COLORS: Record<HeatMetric, ExpressionSpecification> = {
-  risk: [
-    'interpolate',
-    ['linear'],
-    ['heatmap-density'],
-    0,
-    'rgba(15,23,42,0)',
-    0.15,
-    'rgba(34,197,94,0.45)',
-    0.4,
-    'rgba(250,204,21,0.6)',
-    0.6,
-    'rgba(251,146,60,0.72)',
-    0.8,
-    'rgba(239,68,68,0.82)',
-    1,
-    'rgba(192,38,211,0.9)',
-  ],
-  wind: [
-    'interpolate',
-    ['linear'],
-    ['heatmap-density'],
-    0,
-    'rgba(15,23,42,0)',
-    0.2,
-    'rgba(125,211,252,0.4)',
-    0.5,
-    'rgba(56,189,248,0.55)',
-    0.8,
-    'rgba(37,99,235,0.78)',
-    1,
-    'rgba(30,64,175,0.9)',
-  ],
-  rain: [
-    'interpolate',
-    ['linear'],
-    ['heatmap-density'],
-    0,
-    'rgba(15,23,42,0)',
-    0.2,
-    'rgba(94,234,212,0.35)',
-    0.5,
-    'rgba(20,184,166,0.55)',
-    0.8,
-    'rgba(13,148,136,0.75)',
-    1,
-    'rgba(15,118,110,0.9)',
-  ],
-  snow: [
-    'interpolate',
-    ['linear'],
-    ['heatmap-density'],
-    0,
-    'rgba(15,23,42,0)',
-    0.2,
-    'rgba(224,231,255,0.45)',
-    0.5,
-    'rgba(165,180,252,0.6)',
-    0.8,
-    'rgba(199,210,254,0.82)',
-    1,
-    'rgba(255,255,255,0.94)',
-  ],
-}
 
 const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
@@ -137,7 +70,7 @@ interface MapViewProps {
   recommendedRouteId: string | null
   origin: Place | null
   destination: Place | null
-  corridor: CorridorResponse | null
+  corridor?: CorridorResponse | null
   heatHour: number
   heatLayers: HeatLayers
   focused: CheckpointRef | null
@@ -221,45 +154,6 @@ function endpointsToGeoJSON(origin: Place | null, destination: Place | null): Fe
   return { type: 'FeatureCollection', features }
 }
 
-/**
- * Encodes every hour of every corridor metric as a feature property
- * (`risk_h0`, `wind_h0`, …). The time slider then only swaps paint
- * expressions, so scrubbing never re-uploads geometry to the GPU.
- */
-function corridorToGeoJSON(corridor: CorridorResponse | null): FeatureCollection {
-  if (!corridor || !corridor.points.length) return EMPTY_COLLECTION
-
-  return {
-    type: 'FeatureCollection',
-    features: corridor.points.map((point, pointIndex) => {
-      const properties: Record<string, number> = {}
-      for (const metric of HEAT_LAYER_KEYS) {
-        const values = corridor[metric][pointIndex] ?? []
-        for (let hour = 0; hour < values.length; hour += 1) {
-          properties[`${metric}_h${hour}`] = values[hour]
-        }
-      }
-      return {
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: point },
-        properties,
-      }
-    }),
-  }
-}
-
-function heatWeightExpression(hour: number, metric: HeatMetric): ExpressionSpecification {
-  const { max } = HEAT_METRICS[metric]
-  const value: ExpressionSpecification = ['coalesce', ['get', `${metric}_h${hour}`], 0]
-
-  if (metric === 'risk') {
-    // Low risk (score 0) stays unshaded so the heatmap only draws attention to
-    // conditions a driver actually needs to plan around.
-    return ['interpolate', ['linear'], value, 0, 0, 1, 0.35, 2, 0.6, 3, 0.85, 4, 1]
-  }
-  return ['interpolate', ['linear'], value, 0, 0, max, 1]
-}
-
 function checkpointPopupHtml(cp: Checkpoint): string {
   const { weather, risk } = cp
   const reasons = risk.reasons.length
@@ -314,29 +208,49 @@ function tuneDarkBasemap(map: MapLibreMap) {
   }
 }
 
+function firstSymbolLayerId(map: MapLibreMap): string | undefined {
+  return map.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id
+}
+
+function installWeatherRasters(map: MapLibreMap, timeStep: string, layers: HeatLayers) {
+  const before = firstSymbolLayerId(map)
+  for (const metric of HEAT_LAYER_KEYS) {
+    const sourceId = OM_SOURCE_IDS[metric]
+    const layerId = OM_LAYER_IDS[metric]
+    if (!map.getSource(sourceId)) {
+      map.addSource(sourceId, { type: 'raster', url: omTileUrl(metric, timeStep) })
+    }
+    if (!map.getLayer(layerId)) {
+      map.addLayer(
+        {
+          id: layerId,
+          type: 'raster',
+          source: sourceId,
+          layout: { visibility: layers[metric] ? 'visible' : 'none' },
+          paint: { 'raster-opacity': 0.58, 'raster-fade-duration': 0 },
+        },
+        before,
+      )
+    }
+  }
+}
+
+function setWeatherTimeStep(map: MapLibreMap, timeStep: string) {
+  for (const metric of HEAT_LAYER_KEYS) {
+    const source = map.getSource(OM_SOURCE_IDS[metric])
+    if (source && 'setUrl' in source && typeof source.setUrl === 'function') {
+      source.setUrl(omTileUrl(metric, timeStep))
+    }
+  }
+}
+
 /** Creates every source and layer once, in bottom-to-top draw order. */
-function installLayers(map: MapLibreMap, theme: Theme) {
+function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
   for (const name of Object.values(SOURCES)) {
     map.addSource(name, { type: 'geojson', data: EMPTY_COLLECTION })
   }
 
-  for (const metric of HEAT_LAYER_KEYS) {
-    map.addLayer({
-      id: HEAT_LAYER_IDS[metric],
-      type: 'heatmap',
-      source: SOURCES.corridor,
-      layout: { visibility: 'none' },
-      paint: {
-        'heatmap-weight': heatWeightExpression(0, metric),
-        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 3, 1.1, 9, 2.2],
-        // Sample spacing is ~18-40 miles, so the radius grows with zoom to keep
-        // the corridor continuous rather than a string of blobs.
-        'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 3, 14, 9, 340],
-        'heatmap-opacity': 0.62,
-        'heatmap-color': HEAT_COLORS[metric],
-      },
-    })
-  }
+  installWeatherRasters(map, 'current_time_1H', layers)
 
   map.addLayer({
     id: LAYERS.routeCasing,
@@ -346,7 +260,7 @@ function installLayers(map: MapLibreMap, theme: Theme) {
     paint: {
       'line-color': '#020617',
       'line-width': ['interpolate', ['linear'], ['zoom'], 4, 5, 10, 11],
-      'line-opacity': ['case', ['get', 'selected'], 0.9, 0.4],
+      'line-opacity': ['case', ['get', 'selected'], 0.9, 0.55],
     },
   })
 
@@ -366,7 +280,7 @@ function installLayers(map: MapLibreMap, theme: Theme) {
         10,
         ['case', ['get', 'selected'], 7, 3.4],
       ],
-      'line-opacity': ['case', ['get', 'selected'], 1, 0.5],
+      'line-opacity': ['case', ['get', 'selected'], 1, 0.82],
     },
   })
 
@@ -487,7 +401,6 @@ export function MapView({
   recommendedRouteId,
   origin,
   destination,
-  corridor,
   heatHour,
   heatLayers,
   focused,
@@ -522,7 +435,7 @@ export function MapView({
   )
   const checkpointData = useMemo(() => checkpointsToGeoJSON(selectedRoute), [selectedRoute])
   const endpointData = useMemo(() => endpointsToGeoJSON(origin, destination), [origin, destination])
-  const corridorData = useMemo(() => corridorToGeoJSON(corridor), [corridor])
+  const [omTimes, setOmTimes] = useState<string[]>([])
 
   function showPopup(map: MapLibreMap, coordinates: [number, number], html: string) {
     popupRef.current?.remove()
@@ -555,8 +468,8 @@ export function MapView({
     observer.observe(containerRef.current)
     requestAnimationFrame(resize)
 
-    map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
-    map.addControl(new ScaleControl({ unit: 'imperial' }), 'bottom-left')
+    map.addControl(new NavigationControl({ showCompass: false }), 'top-left')
+    map.addControl(new ScaleControl({ unit: 'imperial' }), 'bottom-right')
     map.addControl(
       new AttributionControl({
         compact: true,
@@ -569,7 +482,7 @@ export function MapView({
     map.on('load', () => {
       map.resize()
       if (theme === 'dark') tuneDarkBasemap(map)
-      installLayers(map, theme)
+      installLayers(map, theme, DEFAULT_HEAT_LAYERS)
       installInteractions(map, {
         onCheckpointClick: (ref, coordinates, html) => {
           showPopup(map, coordinates, html).on('close', () => focusRef.current(null))
@@ -614,27 +527,31 @@ export function MapView({
   }, [ready, endpointData])
 
   useEffect(() => {
-    if (ready) setSourceData(SOURCES.corridor, corridorData)
-  }, [ready, corridorData])
-
-  // Scrubbing the slider only swaps which hour property drives the weight.
-  useEffect(() => {
-    const map = mapRef.current
-    if (!ready || !map) return
-    for (const metric of HEAT_LAYER_KEYS) {
-      const layerId = HEAT_LAYER_IDS[metric]
-      if (!map.getLayer(layerId)) continue
-      map.setPaintProperty(layerId, 'heatmap-weight', heatWeightExpression(heatHour, metric))
-    }
-  }, [ready, heatHour])
+    const controller = new AbortController()
+    fetchOmValidTimes(controller.signal)
+      .then(setOmTimes)
+      .catch(() => {
+        if (!controller.signal.aborted) setOmTimes([])
+      })
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
+    setWeatherTimeStep(map, timeStepForHour(omTimes, heatHour))
+  }, [ready, heatHour, omTimes])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    const active = HEAT_LAYER_KEYS.filter((metric) => heatLayers[metric]).length
+    const opacity = active > 1 ? 0.42 : 0.58
     for (const metric of HEAT_LAYER_KEYS) {
-      const layerId = HEAT_LAYER_IDS[metric]
+      const layerId = OM_LAYER_IDS[metric]
       if (!map.getLayer(layerId)) continue
       map.setLayoutProperty(layerId, 'visibility', heatLayers[metric] ? 'visible' : 'none')
+      map.setPaintProperty(layerId, 'raster-opacity', opacity)
     }
   }, [ready, heatLayers])
 

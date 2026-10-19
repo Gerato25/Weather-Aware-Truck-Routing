@@ -20,6 +20,7 @@ export function TripForm({ values, loading, onChange, onSubmit }: TripFormProps)
 
   return (
     <form
+      id="trip-form"
       className="trip-form trip-form-bar"
       onSubmit={(event) => {
         event.preventDefault()
@@ -94,9 +95,8 @@ export function TripForm({ values, loading, onChange, onSubmit }: TripFormProps)
         </div>
       </div>
 
-      <button type="submit" className="primary" disabled={!canSubmit}>
+      <button type="submit" className="visually-hidden">
         {loading ? 'Planning…' : 'Find safest route'}
-        {!loading && <span aria-hidden="true"> →</span>}
       </button>
     </form>
   )
