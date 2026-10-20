@@ -45,6 +45,11 @@ class PlanRequestSerializer(serializers.Serializer):
     interval_miles = serializers.ChoiceField(
         choices=SAMPLING_INTERVALS_MILES, default=25
     )
+    demo_scenario = serializers.ChoiceField(
+        choices=("", "load_wind"),
+        required=False,
+        default="",
+    )
 
     def validate_departure(self, value: datetime) -> datetime:
         if value.tzinfo is None:
@@ -93,6 +98,11 @@ class CorridorRequestSerializer(serializers.Serializer):
     load_lb = serializers.FloatField(min_value=0, max_value=MAX_LOAD_LB)
     anchor = serializers.DateTimeField(required=False)
     hours = serializers.IntegerField(required=False, min_value=1, max_value=72, default=48)
+    demo_scenario = serializers.ChoiceField(
+        choices=("", "load_wind"),
+        required=False,
+        default="",
+    )
 
     def validate_anchor(self, value: datetime) -> datetime:
         if value.tzinfo is None:

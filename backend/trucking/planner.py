@@ -21,6 +21,7 @@ from django.conf import settings
 from .geo import (
     Checkpoint,
     Coord,
+    compass_from_deg,
     haversine_m,
     initial_bearing_deg,
     meters_to_miles,
@@ -55,6 +56,7 @@ class TripRequest:
     departure: datetime
     load_lb: float
     interval_miles: float
+    demo_scenario: str = ""
 
 
 @dataclass
@@ -77,11 +79,16 @@ class EvaluatedCheckpoint:
             "weather": {
                 "wind_mph": self.sample.wind_mph,
                 "wind_gust_mph": self.sample.wind_gust_mph,
+                "wind_dir_deg": None
+                if self.sample.wind_dir_deg is None
+                else round(self.sample.wind_dir_deg, 1),
+                "wind_dir": compass_from_deg(self.sample.wind_dir_deg),
                 "rain_in_hr": self.sample.rain_in_hr,
                 "snow_in_hr": self.sample.snow_in_hr,
                 "temperature_f": self.sample.temperature_f,
                 "visibility_mi": self.sample.visibility_mi,
                 "weather_code": self.sample.weather_code,
+                "forecast_at": self.eta.isoformat() if self.sample.has_observation() else None,
             },
             "risk": {
                 "available": self.assessment.available,
@@ -91,9 +98,9 @@ class EvaluatedCheckpoint:
                 "driver": self.assessment.driver,
                 "wind_used_mph": self.assessment.wind_used_mph,
                 "components": {
-                    "wind": self.assessment.wind.slug if self.assessment.wind else "UNKNOWN",
-                    "rain": self.assessment.rain.slug if self.assessment.rain else "UNKNOWN",
-                    "snow": self.assessment.snow.slug if self.assessment.snow else "UNKNOWN",
+                    "wind": _risk_slug(self.assessment.wind),
+                    "rain": _risk_slug(self.assessment.rain),
+                    "snow": _risk_slug(self.assessment.snow),
                 },
                 "reasons": self.assessment.reasons,
             },
@@ -269,22 +276,51 @@ def collect_routes(router, request: TripRequest) -> list[RawRoute]:
     return routes[:TARGET_ROUTE_COUNT]
 
 
+def _risk_slug(level: RiskLevel | None) -> str:
+    """LOW is 0, so a truthiness check would serialize it as Unknown."""
+    return level.slug if level is not None else "UNKNOWN"
+
+
 def _label_routes(routes: list[EvaluatedRoute]) -> None:
-    """Name routes by what makes each one worth considering."""
+    """Keep the same Route A/B/C names the UI uses, in planner order."""
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for index, route in enumerate(routes):
+        route.label = f"Route {letters[index]}" if index < len(letters) else f"Route {index + 1}"
+
+
+DEMO_LOAD_WIND_MPH = 40.0  # 35–44 mph band; >40,000 lb load escalates to Severe.
+
+
+def _inject_demo_load_wind(
+    routes: list[EvaluatedRoute],
+    load_lb: float,
+    wind_metric: str,
+) -> None:
+    """Put 40 mph wind on the middle of Route A so the 42k lb load rule is visible."""
     if not routes:
         return
-    fastest = min(routes, key=lambda r: r.raw.duration_s)
-    shortest = min(routes, key=lambda r: r.raw.distance_m)
-
-    alternate = 1
-    for route in routes:
-        if route is fastest:
-            route.label = "Fastest"
-        elif route is shortest:
-            route.label = "Shortest"
-        else:
-            route.label = f"Alternate {alternate}"
-            alternate += 1
+    target = routes[0]
+    count = len(target.checkpoints)
+    if count < 3:
+        span = target.checkpoints
+    else:
+        start = max(1, count // 4)
+        end = max(start + 1, (count * 3) // 4)
+        span = target.checkpoints[start:end]
+    for evaluated in span:
+        evaluated.sample = WeatherSample(
+            wind_mph=DEMO_LOAD_WIND_MPH,
+            wind_gust_mph=DEMO_LOAD_WIND_MPH,
+            # From the north: a crosswind on the typical Chicago–Denver haul.
+            wind_dir_deg=0.0 if evaluated.sample.wind_dir_deg is None else evaluated.sample.wind_dir_deg,
+            rain_in_hr=evaluated.sample.rain_in_hr if evaluated.sample.rain_in_hr is not None else 0.0,
+            snow_in_hr=evaluated.sample.snow_in_hr if evaluated.sample.snow_in_hr is not None else 0.0,
+            temperature_f=evaluated.sample.temperature_f,
+            visibility_mi=evaluated.sample.visibility_mi,
+            weather_code=evaluated.sample.weather_code,
+        )
+        evaluated.assessment = assess(evaluated.sample, load_lb, wind_metric)
+    _aggregate(target)
 
 
 # --- scoring ---------------------------------------------------------------
@@ -329,29 +365,33 @@ def _recommendation_reasons(best: EvaluatedRoute, others: list[EvaluatedRoute]) 
         reasons.append("Only one viable route was found.")
         return reasons
 
-    severe_delta = runner_up.miles(RiskLevel.SEVERE) - best.miles(RiskLevel.SEVERE)
-    high_delta = runner_up.miles(RiskLevel.HIGH) - best.miles(RiskLevel.HIGH)
+    severe_best = round(best.miles(RiskLevel.SEVERE), 1)
+    severe_up = round(runner_up.miles(RiskLevel.SEVERE), 1)
+    high_best = round(best.miles(RiskLevel.HIGH), 1)
+    high_up = round(runner_up.miles(RiskLevel.HIGH), 1)
+    avg_best = round(best.average_risk, 2)
+    avg_up = round(runner_up.average_risk, 2)
     hours_delta = (best.raw.duration_s - runner_up.raw.duration_s) / 3600
 
-    if severe_delta > 0.1:
+    if severe_best < severe_up:
         reasons.append(
-            f"{severe_delta:.0f} fewer Severe miles than {runner_up.label} "
-            f"({best.miles(RiskLevel.SEVERE):.0f} vs {runner_up.miles(RiskLevel.SEVERE):.0f})."
+            f"{severe_up - severe_best:.0f} fewer Severe miles than {runner_up.label} "
+            f"({severe_best:.0f} vs {severe_up:.0f})."
         )
-    if high_delta > 0.1:
+    if high_best < high_up:
         reasons.append(
-            f"{high_delta:.0f} fewer High-risk miles than {runner_up.label} "
-            f"({best.miles(RiskLevel.HIGH):.0f} vs {runner_up.miles(RiskLevel.HIGH):.0f})."
+            f"{high_up - high_best:.0f} fewer High-risk miles than {runner_up.label} "
+            f"({high_best:.0f} vs {high_up:.0f})."
         )
-    if abs(severe_delta) <= 0.1 and abs(high_delta) <= 0.1:
-        if best.average_risk < runner_up.average_risk - 0.01:
+    if severe_best == severe_up and high_best == high_up:
+        if avg_best < avg_up:
             reasons.append(
-                f"Same Severe and High mileage as {runner_up.label}, but a lower average "
-                f"risk ({best.average_risk:.2f} vs {runner_up.average_risk:.2f})."
+                f"Tied on Severe and High miles with {runner_up.label}, lower average "
+                f"risk ({avg_best:.2f} vs {avg_up:.2f})."
             )
-        else:
+        elif avg_best == avg_up:
             reasons.append(
-                f"Risk is effectively tied with {runner_up.label}, so the faster route wins."
+                "Tied on Severe miles, High miles and avg risk → shortest time wins."
             )
     if hours_delta > 0.05:
         reasons.append(
@@ -425,6 +465,9 @@ def plan_trip(
         route.arrival = request.departure + timedelta(seconds=route.raw.duration_s)
         _aggregate(route)
 
+    if request.demo_scenario == "load_wind":
+        _inject_demo_load_wind(routes, request.load_lb, wind_metric)
+
     _label_routes(routes)
     ranked = sorted(routes, key=lambda r: r.ranking_key())
     best = ranked[0]
@@ -437,6 +480,7 @@ def plan_trip(
             "departure": request.departure.isoformat(),
             "load_lb": request.load_lb,
             "interval_miles": request.interval_miles,
+            "demo_scenario": request.demo_scenario,
         },
         "provider": {
             "routing": router.name,

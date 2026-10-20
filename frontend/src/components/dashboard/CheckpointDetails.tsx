@@ -3,8 +3,9 @@ import { AlertTriangle, CheckCircle2, CloudRain, Snowflake, Thermometer, Wind } 
 
 import { corridorSampleAt } from '../../lib/corridorHour'
 import {
-  formatEta,
+  compassFromDeg,
   formatEtaRelative,
+  formatForecastStamp,
   formatPounds,
   formatWeather,
   shortPlaceName,
@@ -20,7 +21,9 @@ interface CheckpointDetailsProps {
   origin: string
   destination: string
   loadLb: number
+  departure: string
   heatHour: number
+  overlayAt: string | null
   locationForecast: ReturnType<typeof corridorSampleAt>
   corridorLoading: boolean
 }
@@ -53,15 +56,20 @@ function checkpointLabel(route: Route, checkpoint: Checkpoint, origin: string, d
   return `Mile ${Math.round(checkpoint.mile)}`
 }
 
-function etaOffset(iso: string | null): string | null {
-  const relative = formatEtaRelative(iso)
-  if (!relative || relative === 'now') return relative
-  return relative.replace(/^in /, '+')
+function etaOffset(iso: string | null, departure: string): string | null {
+  return formatEtaRelative(iso, departure)
 }
 
 function badgeLabel(level: RiskDisplaySlug): string {
   if (level === 'NO_TRAVEL' || level === 'UNKNOWN') return RISK_LABELS[level]
   return `${RISK_LABELS[level]} Risk`
+}
+
+function overlayHasValues(forecast: ReturnType<typeof corridorSampleAt>): boolean {
+  if (!forecast) return false
+  return [forecast.wind, forecast.rain, forecast.snow, forecast.temp].some(
+    (value) => value != null && Number.isFinite(value),
+  )
 }
 
 export function CheckpointDetails({
@@ -71,18 +79,26 @@ export function CheckpointDetails({
   origin,
   destination,
   loadLb,
+  departure,
   heatHour,
+  overlayAt,
   locationForecast,
   corridorLoading,
 }: CheckpointDetailsProps) {
   const weather = checkpoint.weather
-  const relative = etaOffset(checkpoint.eta)
+  const relative = etaOffset(checkpoint.eta, departure)
+  const windUsed =
+    checkpoint.risk.wind_used_mph != null && Number.isFinite(checkpoint.risk.wind_used_mph)
+      ? Math.round(checkpoint.risk.wind_used_mph)
+      : null
   const level = checkpoint.risk.level
   const low = level === 'LOW'
+  const etaAvailable = checkpoint.risk.available !== false
   const gusts =
     weather.wind_gust_mph != null && Number.isFinite(weather.wind_gust_mph)
       ? Math.round(weather.wind_gust_mph)
       : null
+  const windDir = weather.wind_dir ?? compassFromDeg(weather.wind_dir_deg)
 
   return (
     <div className="cp-details">
@@ -92,8 +108,11 @@ export function CheckpointDetails({
             {checkpointLabel(route, checkpoint, origin, destination)} (Route {routeLetter(routeIndex)})
           </p>
           <p className="mt-0.5 text-[12px] text-slate-500">
-            ETA {formatEta(checkpoint.eta)}
+            Truck ETA {formatForecastStamp(checkpoint.eta)}
             {relative ? ` (${relative})` : ''}
+          </p>
+          <p className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+            {checkpoint.lat.toFixed(4)}, {checkpoint.lon.toFixed(4)} · mile {checkpoint.mile.toFixed(1)}
           </p>
         </div>
         <span className="cp-pill shrink-0" data-level={level}>
@@ -105,24 +124,31 @@ export function CheckpointDetails({
         <WeatherTile
           icon={<Wind strokeWidth={1.75} className="h-6 w-6" />}
           value={formatWeather(weather.wind_mph, 0, ' mph')}
-          hint={gusts == null ? 'Wind' : `Gusts ${gusts}`}
+          hint={[windDir, gusts == null ? 'Wind mph' : `Gusts ${gusts} mph`].filter(Boolean).join(' · ')}
         />
         <WeatherTile
           icon={<CloudRain strokeWidth={1.75} className="h-6 w-6" />}
           value={formatWeather(weather.rain_in_hr, 2, ' in/hr')}
-          hint="Rain"
+          hint="Rain in/hr"
         />
         <WeatherTile
           icon={<Snowflake strokeWidth={1.75} className="h-6 w-6" />}
           value={formatWeather(weather.snow_in_hr, 1, ' in/hr')}
-          hint="Snow"
+          hint="Snow in/hr"
         />
         <WeatherTile
           icon={<Thermometer strokeWidth={1.75} className="h-6 w-6" />}
           value={formatWeather(weather.temperature_f, 0, '°F')}
-          hint="Temp"
+          hint="Temp °F"
         />
       </dl>
+      <p className="mt-1.5 text-[11px] text-slate-500">
+        {etaAvailable
+          ? `Forecast matched to the truck’s arrival (${formatForecastStamp(weather.forecast_at ?? checkpoint.eta)}). Risk uses the higher of sustained wind and gusts${
+              windUsed != null ? ` (${windUsed} mph)` : ''
+            }.`
+          : 'Forecast unavailable for this arrival time.'}
+      </p>
 
       <div className={`cp-reason mt-3 ${low ? 'is-low' : 'is-elevated'}`}>
         {low ? (
@@ -133,55 +159,57 @@ export function CheckpointDetails({
         <p>{reasonCopy(checkpoint, loadLb)}</p>
       </div>
 
+      <div className="mt-4">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          Risk at truck ETA
+        </p>
+        <div className="space-y-2.5">
+          <RiskMeter label="Wind Risk" level={checkpoint.risk.components.wind} />
+          <RiskMeter label="Rain Risk" level={checkpoint.risk.components.rain} />
+          <RiskMeter label="Snow Risk" level={checkpoint.risk.components.snow} />
+        </div>
+      </div>
+
       <div className="mt-5">
-        <h3 className="text-[13px] font-semibold text-slate-900">Forecast at this location</h3>
-        <p className="mt-0.5 text-[11px] text-slate-500">+{heatHour}h (from now)</p>
+        <h3 className="text-[13px] font-semibold text-slate-900">Map overlay at this location</h3>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Slider +{heatHour}h
+          {overlayAt ? ` · ${formatForecastStamp(overlayAt)}` : ''} — does not replace ETA weather
+        </p>
 
         {corridorLoading && !locationForecast ? (
           <p className="mt-3 text-[12px] text-slate-500">Loading corridor forecast…</p>
-        ) : locationForecast ? (
-          <>
-            <p className="mb-2 mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Conditions
-            </p>
-            <dl className="space-y-2">
-              <ConditionRow
-                icon={<Wind className="h-4 w-4" />}
-                label="Wind"
-                value={
-                  gusts == null
-                    ? formatWeather(locationForecast.wind, 0, ' mph')
-                    : `${formatWeather(locationForecast.wind, 0, ' mph')} (gusts ${gusts})`
-                }
-              />
-              <ConditionRow
-                icon={<CloudRain className="h-4 w-4" />}
-                label="Rain"
-                value={formatWeather(locationForecast.rain, 2, ' in/hr')}
-              />
-              <ConditionRow
-                icon={<Snowflake className="h-4 w-4" />}
-                label="Snow"
-                value={formatWeather(locationForecast.snow, 1, ' in/hr')}
-              />
-              <ConditionRow
-                icon={<Thermometer className="h-4 w-4" />}
-                label="Temperature"
-                value={formatWeather(locationForecast.temp, 0, '°F')}
-              />
-            </dl>
-
-            <p className="mb-2 mt-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Risk breakdown
-            </p>
-            <div className="space-y-2.5">
-              <RiskMeter label="Wind Risk" level={checkpoint.risk.components.wind} />
-              <RiskMeter label="Rain Risk" level={checkpoint.risk.components.rain} />
-              <RiskMeter label="Snow Risk" level={checkpoint.risk.components.snow} />
-            </div>
-          </>
+        ) : overlayHasValues(locationForecast) ? (
+          <dl className="mt-3 space-y-2">
+            <ConditionRow
+              icon={<Wind className="h-4 w-4" />}
+              label="Wind"
+              value={`${formatWeather(locationForecast?.wind, 0, ' mph')}${
+                locationForecast?.windDir != null
+                  ? ` ${compassFromDeg(locationForecast.windDir) ?? ''}`
+                  : ''
+              }`}
+            />
+            <ConditionRow
+              icon={<CloudRain className="h-4 w-4" />}
+              label="Rain"
+              value={formatWeather(locationForecast?.rain, 2, ' in/hr')}
+            />
+            <ConditionRow
+              icon={<Snowflake className="h-4 w-4" />}
+              label="Snow"
+              value={formatWeather(locationForecast?.snow, 1, ' in/hr')}
+            />
+            <ConditionRow
+              icon={<Thermometer className="h-4 w-4" />}
+              label="Temperature"
+              value={formatWeather(locationForecast?.temp, 0, '°F')}
+            />
+          </dl>
         ) : (
-          <p className="mt-3 text-[12px] text-amber-800">Forecast at this location is unavailable.</p>
+          <p className="mt-3 text-[12px] text-amber-800">
+            Overlay forecast is unavailable for this hour at this location.
+          </p>
         )}
       </div>
     </div>

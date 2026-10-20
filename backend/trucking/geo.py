@@ -30,6 +30,14 @@ def meters_to_miles(meters: float) -> float:
     return meters / METERS_PER_MILE
 
 
+def compass_from_deg(degrees: float | None) -> str | None:
+    """Eight-point compass label for a meteorological wind direction (blows from)."""
+    if degrees is None:
+        return None
+    labels = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    return labels[round(degrees / 45.0) % 8]
+
+
 def haversine_m(a: Coord, b: Coord) -> float:
     """Great-circle distance in meters between two (lon, lat) points."""
     lon1, lat1 = a
@@ -154,10 +162,12 @@ class RouteProfile:
         while d < self.total_m:
             distances.append(d)
             d += interval_m
-        # Always finish at the destination, but don't emit a near-duplicate point.
-        if distances and self.total_m - distances[-1] < interval_m * 0.25 and len(distances) > 1:
+        # Always finish at the destination. Only collapse a true near-duplicate
+        # (within 0.5 miles) so a 1,005 mi / 25 mi sample still includes Denver.
+        leftover = self.total_m - distances[-1] if distances else self.total_m
+        if distances and leftover < miles_to_meters(0.5):
             distances[-1] = self.total_m
-        else:
+        elif leftover > 1.0:
             distances.append(self.total_m)
 
         checkpoints: list[Checkpoint] = []

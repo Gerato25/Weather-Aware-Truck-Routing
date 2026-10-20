@@ -12,6 +12,7 @@ interface PlaceFieldProps {
   placeholder: string
   resolved: Place | null
   icon: ReactNode
+  compact?: boolean
   onChange: (value: string) => void
   onResolve: (place: Place | null) => void
 }
@@ -22,6 +23,7 @@ export function PlaceField({
   placeholder,
   resolved,
   icon,
+  compact = false,
   onChange,
   onResolve,
 }: PlaceFieldProps) {
@@ -29,7 +31,7 @@ export function PlaceField({
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
-  const { suggestions, loading } = useGeocodeSuggestions(value, open && !resolved)
+  const { suggestions, loading, error, empty } = useGeocodeSuggestions(value, open && !resolved)
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -63,7 +65,8 @@ export function PlaceField({
     }
   }
 
-  const showList = open && !resolved && (suggestions.length > 0 || loading)
+  const showList =
+    open && !resolved && (suggestions.length > 0 || loading || Boolean(error) || empty)
 
   return (
     <div className="relative" ref={wrapperRef}>
@@ -71,6 +74,7 @@ export function PlaceField({
         label={label}
         htmlFor={inputId}
         icon={icon}
+        compact={compact}
         trailing={
           value ? (
             <button
@@ -105,6 +109,11 @@ export function PlaceField({
           onKeyDown={handleKeyDown}
         />
       </DashField>
+      {resolved && !compact && (
+        <p className="mt-1 text-[11px] tabular-nums text-slate-500">
+          Using {resolved.lat.toFixed(4)}, {resolved.lon.toFixed(4)}
+        </p>
+      )}
       {showList && (
         <ul
           className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
@@ -112,6 +121,16 @@ export function PlaceField({
         >
           {loading && !suggestions.length && (
             <li className="px-3 py-2 text-xs text-slate-500">Searching…</li>
+          )}
+          {error && (
+            <li className="px-3 py-2 text-xs text-amber-800" role="status">
+              {error}
+            </li>
+          )}
+          {empty && (
+            <li className="px-3 py-2 text-xs text-slate-500" role="status">
+              No matching places. Try a city and state, or paste coordinates like 41.88, -87.63.
+            </li>
           )}
           {suggestions.map((place, index) => (
             <li key={`${place.lat},${place.lon},${index}`}>

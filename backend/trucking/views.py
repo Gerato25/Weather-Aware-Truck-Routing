@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from rest_framework import status
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
@@ -91,12 +92,17 @@ def plan(request):
     data = serializer.validated_data
 
     geocoder = get_geocoder()
+    origin = _resolve(data["origin"], geocoder, "origin")
+    destination = _resolve(data["destination"], geocoder, "destination")
+    if abs(origin.lat - destination.lat) < 1e-4 and abs(origin.lon - destination.lon) < 1e-4:
+        raise ValidationError("Origin and destination must be different locations.")
     trip = TripRequest(
-        origin=_resolve(data["origin"], geocoder, "origin"),
-        destination=_resolve(data["destination"], geocoder, "destination"),
+        origin=origin,
+        destination=destination,
         departure=data["departure"],
         load_lb=data["load_lb"],
         interval_miles=float(data["interval_miles"]),
+        demo_scenario=data.get("demo_scenario") or "",
     )
     return Response(plan_trip(trip))
 
@@ -113,6 +119,7 @@ def corridor(request):
             load_lb=data["load_lb"],
             anchor=data.get("anchor") or datetime.now(timezone.utc),
             hours=data["hours"],
+            demo_scenario=data.get("demo_scenario") or "",
         )
     )
     return Response(heatmap)

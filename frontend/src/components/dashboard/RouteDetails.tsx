@@ -1,12 +1,10 @@
-import type { ReactNode } from 'react'
-import { Clock3, Gauge, Mountain, Route as RouteIcon, Weight } from 'lucide-react'
+import { CheckCircle2 } from 'lucide-react'
 
 import type { CheckpointRef } from '../MapView'
 import {
   formatDuration,
   formatEta,
   formatMiles,
-  formatPounds,
   formatRiskScore,
   formatWeather,
   shortPlaceName,
@@ -19,9 +17,14 @@ interface RouteDetailsProps {
   plan: PlanResponse | null
   selectedRouteId: string | null
   focused: CheckpointRef | null
+  compact?: boolean
+  embedded?: boolean
   onSelectRoute: (routeId: string) => void
   onFocusCheckpoint: (ref: CheckpointRef) => void
 }
+
+const RANKING_ORDER =
+  'Ranked by fewest Severe miles, then High miles, lowest average risk, then shortest travel time.'
 
 const BADGE_STYLE: Record<RiskDisplaySlug, { background: string; color: string }> = {
   LOW: { background: '#16a34a', color: '#ffffff' },
@@ -38,10 +41,105 @@ function checkpointLabel(route: Route, checkpoint: Checkpoint, origin: string, d
   return `Mile ${Math.round(checkpoint.mile)}`
 }
 
+function comparisonReason(plan: PlanResponse, route: Route): string {
+  if (route.id === plan.recommendation.route_id) {
+    return plan.recommendation.reasons[0] ?? 'Best overall balance of safety and travel time.'
+  }
+  const recommended = plan.routes.find((item) => item.id === plan.recommendation.route_id)
+  if (!recommended) return route.label
+  const faster = route.summary.duration_hours + 0.05 < recommended.summary.duration_hours
+  const moreSevere =
+    route.summary.miles_by_level.SEVERE > recommended.summary.miles_by_level.SEVERE + 0.5
+  const moreHigh = route.summary.miles_by_level.HIGH > recommended.summary.miles_by_level.HIGH + 0.5
+  if (faster && (moreSevere || moreHigh)) return 'Faster, but higher weather risk.'
+  if (moreSevere || moreHigh) return 'Longer route with higher overall risk.'
+  if (faster) return 'Faster alternative with similar risk.'
+  return 'Alternative corridor.'
+}
+
+export function RouteCompareStrip({
+  plan,
+  selectedRouteId,
+  onSelectRoute,
+}: {
+  plan: PlanResponse
+  selectedRouteId: string | null
+  onSelectRoute: (routeId: string) => void
+}) {
+  const selectedId =
+    plan.routes.find((route) => route.id === selectedRouteId)?.id ?? plan.routes[0]?.id ?? null
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {plan.routes.slice(0, 3).map((route, index) => {
+        const active = route.id === selectedId
+        const recommended = route.id === plan.recommendation.route_id
+        const noTravel = route.summary.miles_by_level.NO_TRAVEL > 0.05
+        const reason = comparisonReason(plan, route)
+        return (
+          <button
+            key={route.id}
+            type="button"
+            onClick={() => onSelectRoute(route.id)}
+            className={`w-full min-w-0 rounded-lg border px-2 py-2 text-left transition ${
+              active
+                ? 'border-blue-300 bg-blue-50/80 shadow-sm'
+                : recommended
+                  ? 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-300'
+                  : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <i className="h-2 w-2 shrink-0 rounded-full" style={{ background: routeColor(index) }} />
+              <span className="text-[11px] font-semibold text-slate-900">
+                Route {routeLetter(index)}
+              </span>
+              {recommended && (
+                <span className="rounded-full bg-emerald-600 px-1.5 py-px text-[8px] font-semibold leading-none text-white">
+                  Recommended
+                </span>
+              )}
+            </span>
+            <dl className={`mt-1.5 grid gap-x-1.5 gap-y-1 ${noTravel ? 'grid-cols-3' : 'grid-cols-5'}`}>
+              <MiniStat label="Travel time" value={formatDuration(route.summary.duration_hours)} />
+              <MiniStat label="Distance" value={formatMiles(route.summary.distance_miles)} />
+              <MiniStat label="Severe mi" value={`${Math.round(route.summary.miles_by_level.SEVERE)}`} />
+              <MiniStat label="High mi" value={`${Math.round(route.summary.miles_by_level.HIGH)}`} />
+              <MiniStat label="Avg. risk" value={formatRiskScore(route.summary.average_risk)} />
+              {noTravel && (
+                <MiniStat label="No Travel" value={`${Math.round(route.summary.miles_by_level.NO_TRAVEL)}`} />
+              )}
+            </dl>
+            <span
+              className={`mt-1.5 flex items-start gap-1 text-[10px] leading-[13px] ${
+                recommended ? 'text-emerald-700' : 'text-slate-500'
+              }`}
+            >
+              {recommended && <CheckCircle2 className="mt-px h-3 w-3 shrink-0" />}
+              {reason}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dd className="truncate text-[11px] font-semibold tabular-nums leading-4 text-slate-800">{value}</dd>
+      <dt className="truncate text-[8px] leading-3 text-slate-500">{label}</dt>
+    </div>
+  )
+}
+
 export function RouteDetails({
   plan,
   selectedRouteId,
   focused,
+  compact = false,
+  embedded = false,
   onSelectRoute,
   onFocusCheckpoint,
 }: RouteDetailsProps) {
@@ -49,36 +147,43 @@ export function RouteDetails({
     plan?.routes.find((route) => route.id === selectedRouteId) ?? plan?.routes[0] ?? null
   const origin = plan?.request.origin.label ?? ''
   const destination = plan?.request.destination.label ?? ''
+  const tight = compact || embedded
 
   return (
-    <section className="dash-board-details overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+    <section
+      className={
+        embedded
+          ? 'flex min-h-0 shrink-0 flex-col border-t border-slate-100'
+          : `flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm ${
+              compact ? 'dash-drawer' : 'rounded-2xl'
+            }`
+      }
+    >
+      <div
+        className={`flex flex-wrap items-end justify-between gap-2 ${
+          embedded ? 'px-3 py-2' : tight ? 'border-b border-slate-100 px-3 py-2' : 'border-b border-slate-100 px-4 py-3'
+        }`}
+      >
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Route Details</h2>
-          <p className="mt-0.5 text-[12px] text-slate-500">
-            Checkpoint weather is the forecast at each arrival time. Click a row to inspect it on the
-            map.
+          <p className={`mt-0.5 text-[11px] text-slate-500 ${tight ? 'leading-4' : ''}`}>
+            {RANKING_ORDER}
           </p>
         </div>
-        {plan && (
-          <dl className="flex flex-wrap gap-2">
-            <InfoChip
-              icon={<Weight className="h-3.5 w-3.5" />}
-              label="Load weight"
-              value={formatPounds(plan.request.load_lb)}
-            />
-            <InfoChip
-              icon={<RouteIcon className="h-3.5 w-3.5" />}
-              label="Checkpoint interval"
-              value={`${plan.request.interval_miles} miles`}
-            />
-          </dl>
+        {selected && (
+          <p className="text-[11px] text-slate-500">
+            {selected.checkpoints.length} checkpoints · arrival-time forecast
+          </p>
         )}
       </div>
 
       {plan && selected ? (
         <>
-          <div className="flex flex-wrap gap-1.5 px-4 pt-3" role="tablist" aria-label="Route details">
+          {!embedded && (
+          <div
+            className={`flex flex-wrap items-center gap-1.5 ${tight ? 'px-3 pt-2' : 'px-4 pt-3'}`}
+            role="tablist"
+          >
             {plan.routes.map((route, index) => {
               const active = route.id === selected.id
               return (
@@ -87,7 +192,7 @@ export function RouteDetails({
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
                     active
                       ? 'dash-btn-primary'
                       : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -100,89 +205,88 @@ export function RouteDetails({
               )
             })}
           </div>
+          )}
 
-          <dl className="grid grid-cols-2 gap-2 px-4 py-3 sm:grid-cols-3 xl:grid-cols-5">
-            <Metric
-              icon={<Clock3 className="h-3.5 w-3.5" />}
-              label="Travel time"
-              value={formatDuration(selected.summary.duration_hours)}
-            />
-            <Metric
-              icon={<RouteIcon className="h-3.5 w-3.5" />}
-              label="Distance"
-              value={formatMiles(selected.summary.distance_miles)}
-            />
-            <Metric
-              icon={<Mountain className="h-3.5 w-3.5" />}
-              label="Severe risk miles"
-              value={`${Math.round(selected.summary.miles_by_level.SEVERE)}`}
-            />
-            <Metric
-              icon={<Mountain className="h-3.5 w-3.5" />}
-              label="High risk miles"
-              value={`${Math.round(selected.summary.miles_by_level.HIGH)}`}
-            />
-            <Metric
-              icon={<Gauge className="h-3.5 w-3.5" />}
-              label="Average risk"
-              value={formatRiskScore(selected.summary.average_risk)}
-            />
-          </dl>
-
-          <div className="dash-table-scroll mx-4 mb-4 h-64 overflow-y-auto overflow-x-auto rounded-xl border border-slate-100 sm:h-72">
-            <table className="w-full min-w-[560px] table-fixed text-left text-[13px]">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <div
+            className={`dash-table-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-slate-100 ${
+              embedded
+                ? 'mx-2 mb-2 mt-1 max-h-64'
+                : compact
+                  ? 'mx-2 mb-2 mt-2 max-h-none'
+                  : 'mx-4 my-3 max-h-72'
+            }`}
+          >
+            <table className={`w-full text-left ${embedded ? 'text-[11px]' : tight ? 'min-w-[640px] text-[12px]' : 'min-w-[720px] text-[13px]'}`}>
+              <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="w-[28%] px-3 py-2.5">Checkpoint</th>
-                  <th className="w-[14%] px-3 py-2.5">ETA</th>
-                  <th className="w-[14%] px-3 py-2.5">Wind</th>
-                  <th className="w-[16%] px-3 py-2.5">Rain</th>
-                  <th className="w-[16%] px-3 py-2.5">Snow</th>
-                  <th className="w-[12%] px-3 py-2.5">Risk</th>
+                  <th className="px-2 py-2">Checkpoint</th>
+                  <th className="px-2 py-2">Dist</th>
+                  <th className="px-2 py-2">ETA</th>
+                  <th className="px-2 py-2">Risk</th>
+                  {!embedded && (
+                    <>
+                      <th className="px-3 py-2.5">Wind</th>
+                      <th className="px-3 py-2.5">Rain</th>
+                      <th className="px-3 py-2.5">Snow</th>
+                      <th className="px-3 py-2.5">Temp</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {selected.checkpoints.map((checkpoint) => {
                   const active =
                     focused?.routeId === selected.id && focused.index === checkpoint.index
+                  const gusts =
+                    checkpoint.weather.wind_gust_mph != null &&
+                    Number.isFinite(checkpoint.weather.wind_gust_mph)
+                      ? ` (gust ${Math.round(checkpoint.weather.wind_gust_mph)})`
+                      : ''
                   return (
                     <tr
                       key={checkpoint.index}
                       className={`cursor-pointer border-t border-slate-100 ${
-                        active ? 'bg-blue-50' : 'hover:bg-slate-50'
+                        active ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'
                       }`}
                       onClick={() =>
                         onFocusCheckpoint({ routeId: selected.id, index: checkpoint.index })
                       }
                     >
-                      <td className="truncate px-3 py-2 font-medium text-slate-800">
-                        <span className="inline-flex min-w-0 items-center gap-2">
+                      <td className="px-2 py-1.5 font-medium text-slate-800">
+                        <span className="inline-flex items-center gap-1.5">
                           <i
                             className="h-2 w-2 shrink-0 rounded-full"
-                            style={{
-                              background: BADGE_STYLE[checkpoint.risk.level].background,
-                            }}
+                            style={{ background: BADGE_STYLE[checkpoint.risk.level].background }}
                           />
-                          <span className="truncate">
-                            {checkpointLabel(selected, checkpoint, origin, destination)}
-                          </span>
+                          {checkpointLabel(selected, checkpoint, origin, destination)}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                      <td className="whitespace-nowrap px-2 py-1.5 text-slate-700">
+                        {Math.round(checkpoint.mile)} mi
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-slate-700">
                         {formatEta(checkpoint.eta)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                        {formatWeather(checkpoint.weather?.wind_mph, 0, ' mph')}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                        {formatWeather(checkpoint.weather?.rain_in_hr, 2, ' in/hr')}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                        {formatWeather(checkpoint.weather?.snow_in_hr, 1, ' in/hr')}
-                      </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1.5">
                         <CompactRiskBadge level={checkpoint.risk.level} />
                       </td>
+                      {!embedded && (
+                        <>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                            {formatWeather(checkpoint.weather.wind_mph, 0, ' mph')}
+                            {checkpoint.weather.wind_mph == null ? '' : gusts}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                            {formatWeather(checkpoint.weather.rain_in_hr, 2, ' in/hr')}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                            {formatWeather(checkpoint.weather.snow_in_hr, 1, ' in/hr')}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                            {formatWeather(checkpoint.weather.temperature_f, 0, '°F')}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   )
                 })}
@@ -192,46 +296,13 @@ export function RouteDetails({
         </>
       ) : (
         <div className="px-4 py-8 text-center">
-          <p className="text-sm font-semibold text-slate-700">No checkpoints yet</p>
+          <p className="text-sm font-semibold text-slate-700">No routes yet</p>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            Analyze a trip to list each checkpoint’s ETA, wind, rain, snow, and risk for Route A, B,
-            and C.
+            Analyze a trip to compare three corridors and inspect checkpoint weather at each arrival time.
           </p>
         </div>
       )}
     </section>
-  )
-}
-
-function InfoChip({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-      <dt className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
-        {icon}
-        {label}
-      </dt>
-      <dd className="text-[12px] font-semibold text-slate-800">{value}</dd>
-    </div>
-  )
-}
-
-function Metric({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-}) {
-  return (
-    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
-      <dt className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500">
-        {icon}
-        {label}
-      </dt>
-      <dd className="mt-0.5 text-sm font-semibold tracking-tight text-slate-900">{value}</dd>
-    </div>
   )
 }
 

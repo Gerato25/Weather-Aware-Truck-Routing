@@ -14,11 +14,14 @@ export interface Place {
 export interface CheckpointWeather {
   wind_mph: number | null
   wind_gust_mph: number | null
+  wind_dir_deg?: number | null
+  wind_dir?: string | null
   rain_in_hr: number | null
   snow_in_hr: number | null
   temperature_f: number | null
   visibility_mi: number | null
   weather_code: number | null
+  forecast_at?: string | null
 }
 
 export interface CheckpointRisk {
@@ -107,10 +110,12 @@ export interface CorridorResponse {
   anchor: string
   hours: string[]
   points: [number, number][]
-  risk: number[][]
-  wind: number[][]
-  rain: number[][]
-  snow: number[][]
+  risk: (number | null)[][]
+  cause?: (string | null)[][]
+  wind: (number | null)[][]
+  wind_dir?: (number | null)[][]
+  rain: (number | null)[][]
+  snow: (number | null)[][]
   temperature?: (number | null)[][]
   max_score: number
   load_lb: number
@@ -162,4 +167,5 @@ export interface TripFormValues {
   departure: string
   loadLb: number
   intervalMiles: 10 | 25 | 50
+  demoLoadWind: boolean
 }

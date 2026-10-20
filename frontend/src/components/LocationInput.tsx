@@ -27,7 +27,7 @@ export function LocationInput({
 
   // Suggestions are suppressed once a place is locked in, otherwise selecting a
   // result would immediately re-query for the text it just inserted.
-  const { suggestions, loading } = useGeocodeSuggestions(value, open && !resolved)
+  const { suggestions, loading, error, empty } = useGeocodeSuggestions(value, open && !resolved)
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -63,7 +63,8 @@ export function LocationInput({
     }
   }
 
-  const showList = open && !resolved && (suggestions.length > 0 || loading)
+  const showList =
+    open && !resolved && (suggestions.length > 0 || loading || Boolean(error) || empty)
 
   return (
     <div className="field location-field" ref={wrapperRef}>
@@ -112,9 +113,24 @@ export function LocationInput({
         )}
       </div>
 
+      {resolved && (
+        <p className="location-resolved">
+          Using {resolved.lat.toFixed(4)}, {resolved.lon.toFixed(4)}
+        </p>
+      )}
       {showList && (
         <ul className="suggestions" role="listbox">
           {loading && !suggestions.length && <li className="suggestion-empty">Searching…</li>}
+          {error && (
+            <li className="suggestion-empty" role="status">
+              {error}
+            </li>
+          )}
+          {empty && (
+            <li className="suggestion-empty" role="status">
+              No matching places. Try a city and state, or paste coordinates like 41.88, -87.63.
+            </li>
+          )}
           {suggestions.map((place, index) => (
             <li key={`${place.lat},${place.lon},${index}`}>
               <button

@@ -45,6 +45,9 @@ HOURLY_VARIABLES = (
 GRID_DEGREES = 0.02
 MAX_FORECAST_DAYS = 16
 SECONDS_PER_HOUR = 3600
+# Hourly series may miss the exact ETA by a few minutes; beyond this window we
+# must not substitute the first or last hour (wrong time, wrong weather).
+FORECAST_SLACK_S = 30 * 60
 # Open-Meteo's free tier rejects overlapping connections ("Too many concurrent
 # requests"). Every call in the process goes through this lock, including the
 # corridor heatmap that starts the moment a plan returns.
@@ -92,6 +95,27 @@ class PointForecast:
             return float(a)
         return float(a) + (float(b) - float(a)) * frac
 
+    def _interpolate_angle(self, series: list[float | None], i: int, j: int, frac: float) -> float | None:
+        """Interpolate a 0-360° bearing the short way around the circle."""
+        if not series:
+            return None
+        a = series[i] if i < len(series) else None
+        b = series[j] if j < len(series) else None
+        if a is None and b is None:
+            return None
+        if a is None:
+            return float(b) % 360.0
+        if b is None:
+            return float(a) % 360.0
+        delta = (float(b) - float(a) + 180.0) % 360.0 - 180.0
+        return (float(a) + delta * frac) % 360.0
+
+    def covers(self, ts: float) -> bool:
+        """True when ``ts`` falls inside the provider's hourly series."""
+        if not self.times:
+            return False
+        return self.times[0] - FORECAST_SLACK_S <= ts <= self.times[-1] + FORECAST_SLACK_S
+
     def _bracket(self, ts: float) -> tuple[int, int, float]:
         """Indices either side of ``ts`` plus the fraction between them."""
         if ts <= self.times[0]:
@@ -110,9 +134,11 @@ class PointForecast:
 
         Checkpoint ETAs rarely land on the hour, so interpolating between the
         bracketing hours avoids the step changes you would get from snapping to
-        the nearest hour.
+        the nearest hour. Times outside the provider series return an empty
+        sample so callers can mark the forecast unavailable instead of using
+        weather from the wrong hour.
         """
-        if not self.times:
+        if not self.covers(ts):
             return WeatherSample()
 
         i, j, frac = self._bracket(ts)
@@ -129,6 +155,7 @@ class PointForecast:
         return WeatherSample(
             wind_mph=_round(self._interpolate(self.wind, i, j, frac), 1),
             wind_gust_mph=_round(self._interpolate(self.gust, i, j, frac), 1),
+            wind_dir_deg=_round(self._interpolate_angle(self.wind_dir, i, j, frac), 1),
             rain_in_hr=_round(self._interpolate(self.rain, i, j, frac), 3),
             snow_in_hr=_round(self._interpolate(self.snow, i, j, frac), 3),
             temperature_f=_round(self._interpolate(self.temperature, i, j, frac), 1)

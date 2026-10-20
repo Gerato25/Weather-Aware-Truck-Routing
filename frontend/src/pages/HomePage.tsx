@@ -110,7 +110,7 @@ export function HomePage({
           >
             <LocationInput
               label="Origin"
-              placeholder="Enter origin (e.g. Denver, CO)"
+              placeholder="Enter origin (e.g. Chicago, IL)"
               value={form.origin}
               resolved={form.originPlace}
               onChange={(value) => onFormChange('origin', value)}
@@ -118,7 +118,7 @@ export function HomePage({
             />
             <LocationInput
               label="Destination"
-              placeholder="Enter destination (e.g. Glenwood Springs, CO)"
+              placeholder="Enter destination (e.g. Denver, CO)"
               value={form.destination}
               resolved={form.destinationPlace}
               onChange={(value) => onFormChange('destination', value)}

@@ -94,6 +94,7 @@ class FakeWeather:
                 times=times,
                 wind=[values.get("wind", 0.0)] * count,
                 gust=[values.get("gust", values.get("wind", 0.0))] * count,
+                wind_dir=[values.get("wind_dir", 270.0)] * count,
                 rain=[values.get("rain", 0.0)] * count,
                 snow=[values.get("snow", 0.0)] * count,
                 temperature=[40.0] * count,

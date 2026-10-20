@@ -103,6 +103,7 @@ class WeatherSample:
 
     wind_mph: float | None = None
     wind_gust_mph: float | None = None
+    wind_dir_deg: float | None = None
     rain_in_hr: float | None = None
     snow_in_hr: float | None = None
     temperature_f: float | None = None

@@ -13,6 +13,7 @@ from trucking.planner import (
 )
 from trucking.providers.base import Place
 from trucking.risk import RiskLevel
+from trucking.weather.open_meteo import PointForecast, snap
 
 from .fakes import FakeRouter, FakeWeather, line, make_route
 
@@ -26,13 +27,18 @@ def departure() -> datetime:
     )
 
 
-def trip(load_lb: float = 20_000.0, interval_miles: float = 25.0) -> TripRequest:
+def trip(
+    load_lb: float = 20_000.0,
+    interval_miles: float = 25.0,
+    demo_scenario: str = "",
+) -> TripRequest:
     return TripRequest(
         origin=ORIGIN,
         destination=DESTINATION,
         departure=departure(),
         load_lb=load_lb,
         interval_miles=interval_miles,
+        demo_scenario=demo_scenario,
     )
 
 
@@ -41,6 +47,80 @@ def calm(lon: float, lat: float) -> dict:
     if lat >= 40.5:
         return {"wind": 50.0, "gust": 50.0}
     return {"wind": 5.0, "gust": 8.0}
+
+
+class TimeVaryingWeather:
+    """Wind climbs 1 mph every hour so ETA sampling is observable."""
+
+    name = "time-fake"
+
+    def __init__(self) -> None:
+        start = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        self.times = [int((start + timedelta(hours=hour)).timestamp()) for hour in range(72)]
+        self.requested: list[tuple[float, float]] = []
+
+    def forecast_days_for(self, latest: datetime) -> int:
+        return 4
+
+    def forecasts(self, coords, forecast_days: int = 3):
+        out: dict = {}
+        count = len(self.times)
+        wind = [float(hour) for hour in range(count)]
+        for coord in coords:
+            key = snap(coord)
+            if key in out:
+                continue
+            self.requested.append(key)
+            out[key] = PointForecast(
+                lon=key[0],
+                lat=key[1],
+                times=self.times,
+                wind=wind,
+                gust=wind,
+                wind_dir=[270.0] * count,
+                rain=[0.0] * count,
+                snow=[0.0] * count,
+                temperature=[40.0] * count,
+                visibility=[16000.0] * count,
+                code=[0] * count,
+            )
+        return out
+
+
+class ShortHorizonWeather:
+    """A two-hour series that cannot cover a 12-hour trip's destination ETA."""
+
+    name = "short-fake"
+
+    def __init__(self) -> None:
+        start = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        self.times = [int((start + timedelta(hours=hour)).timestamp()) for hour in range(2)]
+        self.requested: list[tuple[float, float]] = []
+
+    def forecast_days_for(self, latest: datetime) -> int:
+        return 1
+
+    def forecasts(self, coords, forecast_days: int = 3):
+        out: dict = {}
+        count = len(self.times)
+        for coord in coords:
+            key = snap(coord)
+            if key in out:
+                continue
+            self.requested.append(key)
+            out[key] = PointForecast(
+                lon=key[0],
+                lat=key[1],
+                times=self.times,
+                wind=[5.0] * count,
+                gust=[5.0] * count,
+                rain=[0.0] * count,
+                snow=[0.0] * count,
+                temperature=[40.0] * count,
+                visibility=[16000.0] * count,
+                code=[0] * count,
+            )
+        return out
 
 
 class AggregationTests(SimpleTestCase):
@@ -75,6 +155,46 @@ class AggregationTests(SimpleTestCase):
             northern["miles_by_level"]["SEVERE"], northern["distance_miles"], delta=0.5
         )
         self.assertAlmostEqual(northern["average_risk"], 3.0, places=2)
+
+    def test_low_components_are_not_serialized_as_unknown(self):
+        checkpoint = self.plan()["routes"][0]["checkpoints"][0]
+        self.assertEqual(checkpoint["risk"]["level"], "LOW")
+        self.assertEqual(checkpoint["risk"]["components"]["wind"], "LOW")
+        self.assertEqual(checkpoint["risk"]["components"]["rain"], "LOW")
+        self.assertEqual(checkpoint["risk"]["components"]["snow"], "LOW")
+
+    def test_routes_are_labeled_a_then_b(self):
+        payload = self.plan()
+        self.assertEqual([route["label"] for route in payload["routes"]], ["Route A", "Route B"])
+        self.assertIn(payload["recommendation"]["label"], {"Route A", "Route B"})
+
+    def test_demo_load_wind_makes_route_a_lose_at_42000_lb(self):
+        def still(lon, lat):
+            return {"wind": 5.0, "gust": 5.0}
+
+        router = FakeRouter(
+            [
+                make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 10.0),
+                make_route((-100.0, 40.2), (-90.0, 40.2), 620.0, 12.0),
+            ]
+        )
+        weather = FakeWeather(still)
+        baseline = plan_trip(trip(load_lb=42_000), weather_client=weather, router=router)
+        self.assertEqual(baseline["recommendation"]["route_id"], "route-1")
+
+        demo = plan_trip(
+            trip(load_lb=42_000, demo_scenario="load_wind"),
+            weather_client=weather,
+            router=router,
+        )
+        route_a = demo["routes"][0]
+        self.assertGreater(route_a["summary"]["miles_by_level"]["SEVERE"], 10)
+        severe = next(cp for cp in route_a["checkpoints"] if cp["risk"]["level"] == "SEVERE")
+        self.assertEqual(severe["risk"]["driver"], "wind")
+        self.assertIsNotNone(severe["weather"]["wind_dir_deg"])
+        self.assertEqual(demo["recommendation"]["route_id"], "route-2")
+        self.assertEqual(demo["recommendation"]["label"], "Route B")
+        self.assertTrue(any("Route A" in reason for reason in demo["recommendation"]["reasons"]))
 
     def test_recommendation_prefers_fewer_severe_miles_over_speed(self):
         payload = self.plan()
@@ -124,6 +244,50 @@ class AggregationTests(SimpleTestCase):
             router=FakeRouter([self.southern, self.northern]),
         )
         self.assertEqual(len(weather.requested), len(set(weather.requested)))
+
+    def test_router_receives_resolved_origin_and_destination(self):
+        router = FakeRouter([self.southern])
+        plan_trip(trip(), weather_client=FakeWeather(calm), router=router)
+        waypoints, alternatives, _load = router.calls[0]
+        self.assertEqual(waypoints[0], ORIGIN.coord)
+        self.assertEqual(waypoints[-1], DESTINATION.coord)
+        self.assertEqual(alternatives, 3)
+
+    def test_checkpoints_use_eta_weather_at_their_own_coordinates(self):
+        weather = TimeVaryingWeather()
+        payload = plan_trip(
+            trip(),
+            weather_client=weather,
+            router=FakeRouter([self.southern]),
+        )
+        route = payload["routes"][0]
+        first = route["checkpoints"][0]
+        last = route["checkpoints"][-1]
+
+        self.assertIsNotNone(first["weather"]["wind_mph"])
+        self.assertIsNotNone(last["weather"]["wind_mph"])
+        self.assertGreater(last["weather"]["wind_mph"], first["weather"]["wind_mph"] + 8)
+        self.assertEqual(first["weather"]["forecast_at"], first["eta"])
+        self.assertEqual(last["weather"]["forecast_at"], last["eta"])
+        self.assertEqual(first["weather"]["wind_dir_deg"], 270.0)
+        self.assertEqual(first["weather"]["wind_dir"], "W")
+
+        requested = set(weather.requested)
+        for checkpoint in route["checkpoints"]:
+            self.assertIn(snap((checkpoint["lon"], checkpoint["lat"])), requested)
+
+    def test_out_of_range_eta_weather_is_unavailable(self):
+        weather = ShortHorizonWeather()
+        payload = plan_trip(
+            trip(),
+            weather_client=weather,
+            router=FakeRouter([self.southern]),
+        )
+        last = payload["routes"][0]["checkpoints"][-1]
+        self.assertIsNone(last["weather"]["wind_mph"])
+        self.assertIsNone(last["weather"]["forecast_at"])
+        self.assertFalse(last["risk"]["available"])
+        self.assertEqual(last["risk"]["level"], "UNKNOWN")
 
 
 class RankingTests(SimpleTestCase):

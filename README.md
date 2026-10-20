@@ -22,11 +22,19 @@ Wind, rain, and snow are classified independently; the checkpoint takes the **wo
 | Rain | < 0.10 in/hr | 0.10–0.25 | 0.25–0.50 | 0.50–1.00 | > 1.00 |
 | Snow | < 0.5 in/hr | 0.5–1.0 | 1.0–2.0 | 2.0–3.0 | > 3.0 |
 
-Load overrides (applied to the wind figure actually used — by default the worse of sustained and gust):
+### Wind metric: gusts, not just sustained
+
+High-profile trailers fail in **gusts**. DOT high-wind advisories are issued on peak gusts, so classification uses `max(sustained, gust)` (`WIND_RISK_METRIC=max`). The checkpoint card still shows both numbers. Set `WIND_RISK_METRIC=sustained` or `gust` in `.env` to override.
+
+Load overrides (applied to that wind figure):
 
 - ≥ 55 mph → **No Travel** for any load
 - 45–54 mph **and** load > 30,000 lb → **No Travel**
 - 35–44 mph **and** load > 40,000 lb → **Severe**
+
+The default demo load is **42,000 lb**, just over the 40,000 lb threshold, so 35–44 mph wind becomes Severe. **Demo weather** (40 mph on Route A) is on by default so the Loom shows Route A going Severe and the recommendation switching.
+
+Checkpoints are sampled every 10 / 25 / 50 miles **and always include the destination**, even when the leftover is a few miles (a 1,005 mi / 25 mi trip is 0, 25, …, 1,000, then Denver).
 
 ### Recommendation order
 
@@ -75,7 +83,9 @@ The first `python manage.py runserver` creates `.venv` and installs Django if ne
 
 Optional: set `OPENROUTESERVICE_API_KEY` in `backend/.env` for truck-legal routing. Free key: [openrouteservice.org/dev](https://openrouteservice.org/dev/#/signup).
 
-**Good demo trip:** Chicago, IL → Denver, CO, ~2 hours from now, **42,000 lb**, 25-mile checkpoints. The three corridors often disagree on weather, so the recommendation is not simply “the fastest one.”
+**Good demo trip:** Chicago, IL → Denver, CO, ~2 hours from now, **42,000 lb**, 25-mile checkpoints, with **Demo weather** left on. Route A gets 40 mph wind (Severe at 42k lb); B or C should win.
+
+Route lines are **blue / purple / slate**. Green, yellow, orange, and red are reserved for risk. The Open-Meteo raster overlay covers the map region; corridor sample points still feed checkpoint ETA weather and the local risk strip. ETAs show the browser’s time zone (graders in the US see CT/MT/PT) and “after departure,” not “from now.” Average risk is shown to two decimals so a single Moderate checkpoint does not round to 0.0.
 
 ## Tests
 
@@ -148,12 +158,12 @@ Visiting only the Vercel URL without that env var makes `/api` 404 (Vercel `NOT_
 Suggested outline for the required recording:
 
 1. **Problem (30 s)** — A loaded truck cannot treat “shortest” as “safest”; wind and precip at *arrival time* along the corridor matter.
-2. **Form (1 min)** — Origin / destination autocomplete, departure, 42k lb load (crosses both load-rule thresholds), 25-mile sampling.
-3. **Routes (2 min)** — Three polylines, click each card, stacked risk bar, recommendation table (Severe → High → average → time).
-4. **Checkpoints (2 min)** — Click a High/Severe dot; show ETA, wind/gusts/rain/snow, and the reason string. Toggle “Only show above Low.”
-5. **Heatmap (2 min)** — Play the 0–48 h slider; switch Wind / Rain / Snow; note that scrubbing does not refetch.
-6. **Load rules (1 min)** — Re-plan the same trip at 15,000 lb vs 42,000 lb and show the ranking change if a 45–54 mph stretch is present.
-7. **Code tour (1–2 min)** — `backend/trucking/risk.py` (table + load rules), `planner.py` (ranking key), `frontend/src/components/MapView.tsx` (heatmap paint swap).
+2. **Form (1 min)** — Origin / destination autocomplete, departure, 42k lb load (just over 40,000 lb), 25-mile sampling.
+3. **Routes (2 min)** — Three polylines (blue / purple / slate), Route A/B/C cards, ranking order (No Travel → Severe → High → average → time).
+4. **Checkpoints (2 min)** — Click a stop; show ETA *after departure*, wind vs gust, and Wind/Rain/Snow risk meters matching the badge. Note Denver is the last row.
+5. **Load-rule demo (1 min)** — Demo weather is on: Route A is Severe and drops; recommendation switches. Uncheck it and re-analyze to show live calm weather. Mention `python manage.py test trucking`.
+6. **Heatmap (2 min)** — Play the 0–48 h slider smoothly; switch Wind / Rain / Snow; legend ticks match the table (0.10 / 0.25 / 0.50 / 1.00 for rain).
+7. **Code tour (1 min)** — `backend/trucking/risk.py` (table + load rules + gusts), `planner.py` (ranking key), `frontend/src/components/MapView.tsx` (slider paint swap).
 
 ## Project layout
 

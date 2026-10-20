@@ -49,6 +49,25 @@ export function useTripSession() {
   const corridorLoading = Boolean(selectedRoute) && corridorState?.routeId !== selectedRouteId
 
   const runPlan = useCallback(async (values: TripFormValues) => {
+    const originText = values.origin.trim()
+    const destinationText = values.destination.trim()
+    if (originText.length < 2 || destinationText.length < 2) {
+      setError('Enter both an origin and a destination.')
+      return false
+    }
+    if (values.originPlace && values.destinationPlace) {
+      const samePlace =
+        Math.abs(values.originPlace.lat - values.destinationPlace.lat) < 1e-4 &&
+        Math.abs(values.originPlace.lon - values.destinationPlace.lon) < 1e-4
+      if (samePlace) {
+        setError('Origin and destination must be different locations.')
+        return false
+      }
+    } else if (originText.toLowerCase() === destinationText.toLowerCase()) {
+      setError('Origin and destination must be different locations.')
+      return false
+    }
+
     planAbort.current?.abort()
     corridorAbort.current?.abort()
     const controller = new AbortController()
@@ -60,11 +79,12 @@ export function useTripSession() {
     setFocused(null)
 
     const payload: PlanPayload = {
-      origin: values.originPlace ?? { query: values.origin.trim() },
-      destination: values.destinationPlace ?? { query: values.destination.trim() },
+      origin: values.originPlace ?? { query: originText },
+      destination: values.destinationPlace ?? { query: destinationText },
       departure: fromLocalInputValue(values.departure),
       load_lb: values.loadLb,
       interval_miles: values.intervalMiles,
+      demo_scenario: values.demoLoadWind ? 'load_wind' : '',
     }
 
     try {
@@ -72,6 +92,13 @@ export function useTripSession() {
       setPlan(result)
       setSelectedRouteId(result.recommendation.route_id)
       setHeatHour(0)
+      setForm((current) => ({
+        ...current,
+        origin: result.request.origin.label,
+        destination: result.request.destination.label,
+        originPlace: result.request.origin,
+        destinationPlace: result.request.destination,
+      }))
       rememberTrip(result)
       return true
     } catch (caught) {
@@ -99,6 +126,8 @@ export function useTripSession() {
         load_lb: plan.request.load_lb,
         anchor: plan.request.departure,
         hours: 48,
+        demo_scenario:
+          form.demoLoadWind && selectedRoute.id === plan.routes[0]?.id ? 'load_wind' : '',
       },
       controller.signal,
     )

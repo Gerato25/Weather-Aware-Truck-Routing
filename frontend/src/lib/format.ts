@@ -14,6 +14,7 @@ export function formatClock(iso: string | null): string {
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   })
 }
 
@@ -22,16 +23,23 @@ export function formatEta(iso: string | null): string {
   return new Date(iso).toLocaleString(undefined, {
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   })
 }
 
-export function formatEtaRelative(iso: string | null): string | null {
+export function formatEtaRelative(iso: string | null, fromIso?: string | null): string | null {
   if (!iso) return null
-  const minutes = Math.round((new Date(iso).getTime() - Date.now()) / 60_000)
+  const originMs = fromIso ? new Date(fromIso).getTime() : Date.now()
+  const minutes = Math.round((new Date(iso).getTime() - originMs) / 60_000)
   if (!Number.isFinite(minutes)) return null
-  if (minutes <= 0) return 'now'
+  const fromDeparture = Boolean(fromIso)
+  if (minutes <= 0) return fromDeparture ? 'at departure' : 'now'
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
+  if (fromDeparture) {
+    if (hours <= 0) return `${rest}m after departure`
+    return `${hours}h ${rest}m after departure`
+  }
   if (hours <= 0) return `in ${rest}m`
   return `in ${hours}h ${rest}m`
 }
@@ -43,6 +51,20 @@ export function formatDateTime(iso: string | null): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
+  })
+}
+
+/** Full arrival/forecast stamp with timezone, used on checkpoint details. */
+export function formatForecastStamp(iso: string | null): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
   })
 }
 
@@ -50,7 +72,7 @@ export function formatMiles(miles: number): string {
   return `${Math.round(miles).toLocaleString()} mi`
 }
 
-export function formatRiskScore(value: number | null | undefined, digits = 1): string {
+export function formatRiskScore(value: number | null | undefined, digits = 2): string {
   return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits)
 }
 
@@ -66,6 +88,15 @@ export function formatWeather(
 
 export function formatPounds(lb: number): string {
   return `${Math.round(lb).toLocaleString()} lb`
+}
+
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
+
+/** Eight-point compass for a meteorological wind direction (blows from). */
+export function compassFromDeg(degrees: number | null | undefined): string | null {
+  if (degrees == null || !Number.isFinite(degrees)) return null
+  const wrapped = ((degrees % 360) + 360) % 360
+  return COMPASS[Math.round(wrapped / 45) % 8]
 }
 
 /** Value for a `datetime-local` input, which has no timezone and needs minutes. */

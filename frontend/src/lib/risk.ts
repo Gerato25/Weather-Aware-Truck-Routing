@@ -48,8 +48,8 @@ export function scoreLabel(score: number | null | undefined): string {
   return RISK_LABELS[RISK_LEVELS[scoreIndex(score)]]
 }
 
-/** Route line colours, kept distinct from the risk palette to avoid confusion. */
-export const ROUTE_COLORS = ['#2563eb', '#16a34a', '#7c3aed']
+/** Route line colours, kept off the risk palette (green / yellow / orange / red). */
+export const ROUTE_COLORS = ['#2563eb', '#7c3aed', '#64748b']
 
 export function routeColor(index: number): string {
   return ROUTE_COLORS[index % ROUTE_COLORS.length]
@@ -65,7 +65,7 @@ export type HeatLayers = Record<HeatMetric, boolean>
 export const DEFAULT_HEAT_LAYERS: HeatLayers = {
   risk: true,
   wind: false,
-  rain: true,
+  rain: false,
   snow: false,
 }
 

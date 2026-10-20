@@ -1,105 +1,55 @@
-import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec'
+import type { ExpressionSpecification, FilterSpecification } from '@maplibre/maplibre-gl-style-spec'
 import type { Feature, FeatureCollection, Point } from 'geojson'
 
 import type { CorridorResponse } from '../types'
 
-import { RISK_COLORS, type HeatMetric } from './risk'
+import { RISK_COLORS, type HeatLayers, type HeatMetric } from './risk'
 
-/** One interpolated vertex between neighbouring corridor samples. */
-const DENSIFY_STEPS = 1
-/** Skip pairs farther than ~55 miles so laterals do not stitch across gaps. */
-const MAX_STEP_DEG = 0.8
+export type OverlayMode = 'all' | 'wind' | 'rain' | 'snow' | 'off'
 
-export const HEAT_SOURCE_IDS: Record<HeatMetric, string> = {
-  risk: 'heat-risk',
-  wind: 'heat-wind',
-  rain: 'heat-rain',
-  snow: 'heat-snow',
-}
-
-export const HEAT_LAYER_IDS: Record<HeatMetric, string> = {
-  risk: 'heat-risk-layer',
-  wind: 'heat-wind-layer',
-  rain: 'heat-rain-layer',
-  snow: 'heat-snow-layer',
-}
+export const CORRIDOR_SOURCE = 'corridor-hours'
+export const CORRIDOR_FILL_LAYER = 'corridor-fill'
+export const CORRIDOR_CAUSE_LAYER = 'corridor-cause'
 
 const EMPTY: FeatureCollection<Point> = { type: 'FeatureCollection', features: [] }
 
-function hourProps(row: number[]): Record<string, number> {
-  const props: Record<string, number> = {}
-  for (let hour = 0; hour < row.length; hour += 1) {
-    props[`h${hour}`] = row[hour] ?? 0
-  }
-  return props
+export function overlayFromHeatLayers(layers: HeatLayers): OverlayMode {
+  if (layers.risk) return 'all'
+  if (layers.wind) return 'wind'
+  if (layers.rain) return 'rain'
+  if (layers.snow) return 'snow'
+  return 'off'
 }
 
-function lerpProps(
-  a: Record<string, number>,
-  b: Record<string, number>,
-  t: number,
-): Record<string, number> {
-  const out: Record<string, number> = {}
-  for (const key of Object.keys(a)) {
-    out[key] = a[key] + ((b[key] ?? a[key]) - a[key]) * t
-  }
-  return out
-}
-
-function tooFar(a: [number, number], b: [number, number]): boolean {
-  const dlon = a[0] - b[0]
-  const dlat = a[1] - b[1]
-  return dlon * dlon + dlat * dlat > MAX_STEP_DEG * MAX_STEP_DEG
-}
-
-/** Shift stacked overlays so Risk / Wind / Rain / Snow do not sit on the same pixels. */
-const METRIC_OFFSET_DEG: Record<HeatMetric, [number, number]> = {
-  risk: [0, 0],
-  wind: [0, 0.16],
-  rain: [0, -0.16],
-  snow: [0.18, 0.06],
-}
-
-function offsetCoord(coord: [number, number], metric: HeatMetric): [number, number] {
-  const [dlon, dlat] = METRIC_OFFSET_DEG[metric]
-  return [coord[0] + dlon, coord[1] + dlat]
-}
-
-/** Corridor samples as GeoJSON. Extra vertices are lerped locally so the ribbon looks continuous. */
-export function corridorHeatGeoJSON(
+/** One feature per cell per hour so the slider can `setFilter` instead of reloading. */
+export function corridorHourGeoJSON(
   corridor: CorridorResponse | null | undefined,
-  metric: HeatMetric,
 ): FeatureCollection<Point> {
   if (!corridor?.points.length) return EMPTY
 
-  const grid = corridor[metric]
-  const samples: { coord: [number, number]; props: Record<string, number> }[] = []
+  const hours = corridor.hours.length
+  const features: Feature<Point>[] = []
 
   corridor.points.forEach((coord, index) => {
-    samples.push({ coord: offsetCoord(coord, metric), props: hourProps(grid[index] ?? []) })
-  })
-
-  const features: Feature<Point>[] = []
-  samples.forEach((sample, index) => {
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: sample.coord },
-      properties: sample.props,
-    })
-    const next = samples[index + 1]
-    if (!next || tooFar(sample.coord, next.coord)) return
-    for (let step = 1; step <= DENSIFY_STEPS; step += 1) {
-      const t = step / (DENSIFY_STEPS + 1)
+    for (let hour = 0; hour < hours; hour += 1) {
+      const risk = corridor.risk[index]?.[hour]
+      const wind = corridor.wind[index]?.[hour]
+      const rain = corridor.rain[index]?.[hour]
+      const snow = corridor.snow[index]?.[hour]
+      const windDir = corridor.wind_dir?.[index]?.[hour]
+      const cause = corridor.cause?.[index]?.[hour] ?? ''
       features.push({
         type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [
-            sample.coord[0] + (next.coord[0] - sample.coord[0]) * t,
-            sample.coord[1] + (next.coord[1] - sample.coord[1]) * t,
-          ],
+        geometry: { type: 'Point', coordinates: coord },
+        properties: {
+          hour,
+          risk: risk == null || !Number.isFinite(risk) ? -1 : risk,
+          wind: wind == null || !Number.isFinite(wind) ? 0 : wind,
+          rain: rain == null || !Number.isFinite(rain) ? 0 : rain,
+          snow: snow == null || !Number.isFinite(snow) ? 0 : snow,
+          windDir: windDir == null || !Number.isFinite(windDir) ? 0 : windDir,
+          cause,
         },
-        properties: lerpProps(sample.props, next.props, t),
       })
     }
   })
@@ -107,40 +57,35 @@ export function corridorHeatGeoJSON(
   return { type: 'FeatureCollection', features }
 }
 
-export function heatColorExpression(hour: number, metric: HeatMetric): ExpressionSpecification {
-  const value: ExpressionSpecification = ['coalesce', ['get', `h${hour}`], 0]
-  if (metric === 'risk') {
-    return [
-      'case',
-      ['<', value, 0.35],
-      'rgba(34,197,94,0)',
-      [
-        'interpolate',
-        ['linear'],
-        value,
-        0.35,
-        'rgba(34,197,94,0.35)',
-        1,
-        RISK_COLORS.MODERATE,
-        2,
-        RISK_COLORS.HIGH,
-        3,
-        RISK_COLORS.SEVERE,
-        4,
-        RISK_COLORS.NO_TRAVEL,
-      ],
-    ]
-  }
-  if (metric === 'wind') {
+export function hourFilter(hour: number): FilterSpecification {
+  return ['==', ['get', 'hour'], hour]
+}
+
+export function causeFilter(hour: number, mode: OverlayMode): FilterSpecification {
+  const atHour: FilterSpecification = ['==', ['get', 'hour'], hour]
+  if (mode === 'off') return ['==', ['get', 'hour'], -1]
+  if (mode === 'wind') return ['all', atHour, ['>=', ['get', 'wind'], 25]]
+  if (mode === 'rain') return ['all', atHour, ['>=', ['get', 'rain'], 0.1]]
+  if (mode === 'snow') return ['all', atHour, ['>=', ['get', 'snow'], 0.5]]
+  return [
+    'all',
+    atHour,
+    ['>=', ['get', 'risk'], 1],
+    ['in', ['get', 'cause'], ['literal', ['wind', 'rain', 'snow']]],
+  ]
+}
+
+export function overlayFillColor(mode: OverlayMode): ExpressionSpecification {
+  if (mode === 'wind') {
     return [
       'interpolate',
       ['linear'],
-      value,
+      ['get', 'wind'],
       0,
       'rgba(14,165,233,0)',
       12,
       'rgba(14,165,233,0)',
-      20,
+      25,
       '#38bdf8',
       35,
       '#0284c7',
@@ -150,11 +95,11 @@ export function heatColorExpression(hour: number, metric: HeatMetric): Expressio
       '#4c1d95',
     ]
   }
-  if (metric === 'rain') {
+  if (mode === 'rain') {
     return [
       'interpolate',
       ['linear'],
-      value,
+      ['get', 'rain'],
       0,
       'rgba(37,99,235,0)',
       0.04,
@@ -169,21 +114,56 @@ export function heatColorExpression(hour: number, metric: HeatMetric): Expressio
       '#1e3a8a',
     ]
   }
+  if (mode === 'snow') {
+    return [
+      'interpolate',
+      ['linear'],
+      ['get', 'snow'],
+      0,
+      'rgba(167,139,250,0)',
+      0.15,
+      'rgba(167,139,250,0)',
+      0.5,
+      '#c4b5fd',
+      1,
+      '#a78bfa',
+      2,
+      '#7c3aed',
+      3,
+      '#4c1d95',
+    ]
+  }
   return [
-    'interpolate',
-    ['linear'],
-    value,
-    0,
-    'rgba(167,139,250,0)',
-    0.15,
-    'rgba(167,139,250,0)',
-    0.5,
-    '#c4b5fd',
-    1,
-    '#a78bfa',
-    2,
-    '#7c3aed',
-    3,
-    '#4c1d95',
+    'case',
+    ['<', ['get', 'risk'], 0],
+    'rgba(148,163,184,0)',
+    ['<', ['get', 'risk'], 1],
+    'rgba(34,197,94,0.08)',
+    [
+      'match',
+      ['round', ['get', 'risk']],
+      1,
+      RISK_COLORS.MODERATE,
+      2,
+      RISK_COLORS.HIGH,
+      3,
+      RISK_COLORS.SEVERE,
+      4,
+      RISK_COLORS.NO_TRAVEL,
+      RISK_COLORS.MODERATE,
+    ],
   ]
+}
+
+export function overlayFillOpacity(mode: OverlayMode): ExpressionSpecification | number {
+  if (mode === 'all') {
+    return ['case', ['<', ['get', 'risk'], 1], 0.12, 0.58]
+  }
+  return 0.55
+}
+
+/** Kept for older call sites that still key off a metric name. */
+export function heatColorExpression(_hour: number, metric: HeatMetric): ExpressionSpecification {
+  if (metric === 'risk') return overlayFillColor('all')
+  return overlayFillColor(metric)
 }

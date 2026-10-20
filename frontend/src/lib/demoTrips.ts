@@ -1,15 +1,16 @@
 import { hoursFromNow, toLocalInputValue } from './format'
 import type { TripFormValues } from '../types'
 
-/** I-70 over the high Rockies: live 0–48h overlay currently has wind, rain, and snow. */
+/** Chicago–Denver is a long-haul plains corridor (~1,000 mi) with three distinct alternatives. */
 export const INITIAL_FORM: TripFormValues = {
-  origin: 'Denver, CO',
-  destination: 'Glenwood Springs, CO',
-  originPlace: { label: 'Denver, CO', lat: 39.7392, lon: -104.9903 },
-  destinationPlace: { label: 'Glenwood Springs, CO', lat: 39.5505, lon: -107.3248 },
+  origin: 'Chicago, IL',
+  destination: 'Denver, CO',
+  originPlace: { label: 'Chicago, IL', lat: 41.8781, lon: -87.6298 },
+  destinationPlace: { label: 'Denver, CO', lat: 39.7392, lon: -104.9903 },
   departure: toLocalInputValue(hoursFromNow(2)),
   loadLb: 42_000,
   intervalMiles: 25,
+  demoLoadWind: true,
 }
 
 export interface DemoTrip {
@@ -24,13 +25,22 @@ export interface DemoTrip {
 
 export const DEMO_TRIPS: DemoTrip[] = [
   {
+    id: 'chi-den-heavy',
+    title: 'Plains haul',
+    origin: 'Chicago, IL',
+    destination: 'Denver, CO',
+    loadLb: 42_000,
+    intervalMiles: 25,
+    why: 'A ~1,000 mi run where the three corridors often split on rain vs wind.',
+  },
+  {
     id: 'den-gws-heavy',
-    title: 'Heavy haul',
+    title: 'Mountain haul',
     origin: 'Denver, CO',
     destination: 'Glenwood Springs, CO',
     loadLb: 42_000,
     intervalMiles: 25,
-    why: 'I-70 through Eisenhower and Vail currently carries wind, rain, and snow on the overlay.',
+    why: 'Shorter I-70 sample through Eisenhower and Vail when you want a compact mountain overlay.',
   },
   {
     id: 'den-gws-light',
@@ -40,15 +50,6 @@ export const DEMO_TRIPS: DemoTrip[] = [
     loadLb: 15_000,
     intervalMiles: 25,
     why: 'Same mountain corridor at 15,000 lb — wind stays in its weather band instead of escalating.',
-  },
-  {
-    id: 'chi-den-heavy',
-    title: 'Plains haul',
-    origin: 'Chicago, IL',
-    destination: 'Denver, CO',
-    loadLb: 42_000,
-    intervalMiles: 25,
-    why: 'A longer plains run where the three corridors often split on rain vs wind.',
   },
 ]
 
@@ -61,5 +62,6 @@ export function formFromDemo(trip: DemoTrip): TripFormValues {
     departure: toLocalInputValue(hoursFromNow(2)),
     loadLb: trip.loadLb,
     intervalMiles: trip.intervalMiles,
+    demoLoadWind: false,
   }
 }

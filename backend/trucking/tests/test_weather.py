@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.test import SimpleTestCase
 
 from trucking.http import UpstreamError
-from trucking.weather.open_meteo import OpenMeteoClient
+from trucking.weather.open_meteo import OpenMeteoClient, PointForecast
 
 
 def _series(count: int = 4) -> dict:
@@ -88,3 +88,49 @@ class OpenMeteoParseTests(SimpleTestCase):
         self.assertFalse(sample.has_observation())
         self.assertIsNone(sample.wind_mph)
         self.assertIsNone(sample.rain_in_hr)
+
+    def test_sample_at_interpolates_between_hourly_steps(self):
+        forecast = PointForecast(
+            lon=-87.63,
+            lat=41.88,
+            times=[1_700_000_000, 1_700_003_600],
+            wind=[10.0, 20.0],
+            gust=[12.0, 22.0],
+            wind_dir=[350.0, 10.0],
+            rain=[0.0, 0.20],
+            snow=[0.0, 1.0],
+            temperature=[40.0, 50.0],
+            visibility=[16093.44, 16093.44],
+            code=[0, 1],
+        )
+        sample = forecast.sample_at(1_700_001_800)
+        self.assertAlmostEqual(sample.wind_mph, 15.0, places=1)
+        self.assertAlmostEqual(sample.wind_gust_mph, 17.0, places=1)
+        self.assertAlmostEqual(sample.wind_dir_deg, 0.0, places=1)
+        self.assertAlmostEqual(sample.rain_in_hr, 0.1, places=3)
+        self.assertAlmostEqual(sample.snow_in_hr, 0.5, places=3)
+        self.assertAlmostEqual(sample.temperature_f, 45.0, places=1)
+
+    def test_sample_at_outside_the_series_is_unavailable(self):
+        forecast = PointForecast(
+            lon=-87.63,
+            lat=41.88,
+            times=[1_700_000_000, 1_700_003_600],
+            wind=[40.0, 40.0],
+            gust=[40.0, 40.0],
+            rain=[0.0, 0.0],
+            snow=[0.0, 0.0],
+            temperature=[40.0, 40.0],
+            visibility=[16000.0, 16000.0],
+            code=[0, 0],
+        )
+        early = forecast.sample_at(1_700_000_000 - 3 * 3600)
+        late = forecast.sample_at(1_700_003_600 + 3 * 3600)
+        self.assertFalse(early.has_observation())
+        self.assertFalse(late.has_observation())
+        self.assertIsNone(early.wind_mph)
+        self.assertIsNone(late.temperature_f)
+        # Inside the series the same wind must still be returned.
+        inside = forecast.sample_at(1_700_000_000)
+        self.assertTrue(inside.has_observation())
+        self.assertAlmostEqual(inside.wind_mph, 40.0, places=1)

@@ -20,7 +20,7 @@ const OMAHA: [number, number] = [-95.9345, 41.2565]
 const ST_LOUIS: [number, number] = [-90.1994, 38.627]
 const CHEYENNE: [number, number] = [-104.8202, 41.14]
 
-const ROUTE_COLORS = ['#22c55e', '#3b82f6', '#a855f7']
+const ROUTE_COLORS = ['#2563eb', '#7c3aed', '#64748b']
 
 const FALLBACK_ROUTES: [number, number][][] = [
   [

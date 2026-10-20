@@ -125,6 +125,14 @@ class PlanValidationTests(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("origin", response.json()["detail"])
 
+    def test_geocoded_origin_matching_destination_is_rejected(self):
+        same = Place(label="Chicago, IL", lat=41.88, lon=-87.63)
+        with mock.patch("trucking.views.get_geocoder") as geocoder:
+            geocoder.return_value.search.return_value = [same]
+            response = self.post(valid_payload(origin="Chicago", destination="CHI"))
+
+        self.assertEqual(response.status_code, 400)
+
 
 class GeocodeEndpointTests(SimpleTestCase):
     def test_short_queries_are_rejected(self):

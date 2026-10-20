@@ -3,6 +3,7 @@ import type { CorridorResponse, RiskDisplaySlug } from '../types'
 
 export interface CorridorHourStats {
   wind: number | null
+  windDir: number | null
   rain: number | null
   snow: number | null
   temp: number | null
@@ -37,6 +38,7 @@ export function corridorHourStats(
   if (!corridor?.points.length) return null
   return {
     wind: peak(seriesAt(corridor.wind, hour)),
+    windDir: mean(seriesAt(corridor.wind_dir, hour)),
     rain: peak(seriesAt(corridor.rain, hour)),
     snow: peak(seriesAt(corridor.snow, hour)),
     temp: mean(seriesAt(corridor.temperature, hour)),
@@ -101,6 +103,7 @@ export function corridorSampleAt(
   const risk = cellAt(corridor.risk, index, hour)
   return {
     wind: cellAt(corridor.wind, index, hour),
+    windDir: cellAt(corridor.wind_dir, index, hour),
     rain: cellAt(corridor.rain, index, hour),
     snow: cellAt(corridor.snow, index, hour),
     temp: cellAt(corridor.temperature, index, hour),

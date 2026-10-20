@@ -13,6 +13,7 @@ from trucking.corridor import (
 )
 from trucking.geo import haversine_m, meters_to_miles
 from trucking.risk import RiskLevel
+from trucking.weather.open_meteo import PointForecast, snap
 
 from .fakes import FakeWeather, line
 
@@ -63,10 +64,12 @@ class HeatmapTests(SimpleTestCase):
         grid = self.build(lambda lon, lat: {"wind": 10.0})
 
         self.assertEqual(len(grid["hours"]), 49)  # hour 0 through 48 inclusive
-        for key in ("risk", "wind", "rain", "snow"):
+        for key in ("risk", "cause", "wind", "wind_dir", "rain", "snow"):
             with self.subTest(key=key):
                 self.assertEqual(len(grid[key]), len(grid["points"]))
                 self.assertTrue(all(len(row) == 49 for row in grid[key]))
+        self.assertEqual(grid["wind_dir"][0][0], 270.0)
+        self.assertEqual(grid["cause"][0][0], "")
 
     def test_anchor_is_aligned_to_the_hour(self):
         grid = self.build(lambda lon, lat: {"wind": 10.0})
@@ -86,6 +89,7 @@ class HeatmapTests(SimpleTestCase):
         self.assertTrue(
             all(score == RiskLevel.NO_TRAVEL for row in gale["risk"] for score in row)
         )
+        self.assertTrue(all(driver == "wind" for row in gale["cause"] for driver in row))
 
     def test_load_rules_apply_to_the_heatmap(self):
         conditions = lambda lon, lat: {"wind": 50.0, "gust": 50.0}  # noqa: E731
@@ -98,7 +102,24 @@ class HeatmapTests(SimpleTestCase):
     def test_snow_is_reported_alongside_risk(self):
         grid = self.build(lambda lon, lat: {"wind": 5.0, "snow": 2.5})
         self.assertEqual(grid["risk"][0][0], int(RiskLevel.SEVERE))
+        self.assertEqual(grid["cause"][0][0], "snow")
         self.assertAlmostEqual(grid["snow"][0][0], 2.5, places=2)
+
+    def test_demo_load_wind_paints_the_middle_of_the_corridor(self):
+        grid = build_heatmap(
+            CorridorRequest(
+                seeds=self.seeds,
+                load_lb=42_000.0,
+                anchor=self.anchor,
+                hours=6,
+                demo_scenario="load_wind",
+            ),
+            weather_client=FakeWeather(lambda lon, lat: {"wind": 5.0, "gust": 5.0}),
+        )
+        mid = len(grid["points"]) // 2
+        self.assertGreaterEqual(grid["risk"][mid][0], int(RiskLevel.SEVERE))
+        self.assertEqual(grid["cause"][mid][0], "wind")
+        self.assertEqual(grid["cause"][0][0], "")
 
     def test_empty_seed_list_returns_an_empty_grid(self):
         grid = build_heatmap(
@@ -106,3 +127,45 @@ class HeatmapTests(SimpleTestCase):
             weather_client=FakeWeather(lambda lon, lat: {}),
         )
         self.assertEqual(grid["points"], [])
+
+    def test_hours_beyond_the_forecast_are_unavailable(self):
+        class TwoHourWeather:
+            name = "two-hour"
+
+            def forecast_days_for(self, latest):
+                return 1
+
+            def forecasts(self, coords, forecast_days=3):
+                start = datetime.now(timezone.utc).replace(
+                    minute=0, second=0, microsecond=0
+                )
+                times = [int((start + timedelta(hours=hour)).timestamp()) for hour in range(2)]
+                out = {}
+                for coord in coords:
+                    key = snap(coord)
+                    if key in out:
+                        continue
+                    out[key] = PointForecast(
+                        lon=key[0],
+                        lat=key[1],
+                        times=times,
+                        wind=[10.0, 10.0],
+                        gust=[10.0, 10.0],
+                        rain=[0.0, 0.0],
+                        snow=[0.0, 0.0],
+                        temperature=[40.0, 40.0],
+                        visibility=[16000.0, 16000.0],
+                        code=[0, 0],
+                    )
+                return out
+
+        grid = build_heatmap(
+            CorridorRequest(
+                seeds=self.seeds, load_lb=20_000.0, anchor=self.anchor, hours=48
+            ),
+            weather_client=TwoHourWeather(),
+        )
+        self.assertEqual(grid["risk"][0][0], int(RiskLevel.LOW))
+        self.assertEqual(grid["risk"][0][-1], -1)
+        self.assertIsNone(grid["wind"][0][-1])
+        self.assertIsNone(grid["rain"][0][-1])

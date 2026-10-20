@@ -86,6 +86,7 @@ export interface PlanPayload {
   departure: string
   load_lb: number
   interval_miles: number
+  demo_scenario?: '' | 'load_wind'
 }
 
 export function planTrip(payload: PlanPayload, signal?: AbortSignal): Promise<PlanResponse> {
@@ -97,7 +98,13 @@ export function planTrip(payload: PlanPayload, signal?: AbortSignal): Promise<Pl
 }
 
 export function fetchCorridor(
-  payload: { seeds: [number, number][]; load_lb: number; anchor: string; hours: number },
+  payload: {
+    seeds: [number, number][]
+    load_lb: number
+    anchor: string
+    hours: number
+    demo_scenario?: '' | 'load_wind'
+  },
   signal?: AbortSignal,
 ): Promise<CorridorResponse> {
   return request<CorridorResponse>('/corridor/', {

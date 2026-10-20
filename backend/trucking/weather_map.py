@@ -8,7 +8,7 @@ from math import ceil, sqrt
 
 from django.conf import settings
 
-from .geo import Coord
+from .geo import Coord, compass_from_deg
 from .risk import RiskLevel, assess_score
 from .weather.open_meteo import OpenMeteoClient, PointForecast, snap
 
@@ -146,13 +146,6 @@ def build_weather_map(request: WeatherMapRequest, weather_client: OpenMeteoClien
     }
 
 
-def _compass(degrees: float | None) -> str | None:
-    if degrees is None:
-        return None
-    labels = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-    return labels[round(degrees / 45) % 8]
-
-
 def _extras(forecast: PointForecast, ts: float) -> dict:
     i, j, frac = forecast._bracket(ts)
 
@@ -164,12 +157,13 @@ def _extras(forecast: PointForecast, ts: float) -> dict:
 
     humidity = series(forecast.humidity)
     dewpoint = series(forecast.dewpoint)
-    wind_dir = series(forecast.wind_dir)
+    wind_dir = forecast._interpolate_angle(forecast.wind_dir, i, j, frac)
+    wind_dir = None if wind_dir is None else round(wind_dir, 1)
     return {
         "humidity_pct": humidity,
         "dewpoint_f": dewpoint,
         "wind_dir_deg": wind_dir,
-        "wind_dir": _compass(wind_dir),
+        "wind_dir": compass_from_deg(wind_dir),
     }
 
 

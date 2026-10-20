@@ -4,7 +4,7 @@ import { geocode } from '../api/client'
 import type { Place } from '../types'
 
 const DEBOUNCE_MS = 350
-const MIN_QUERY_LENGTH = 3
+export const MIN_QUERY_LENGTH = 3
 
 /**
  * Debounced place lookup for the origin/destination inputs.
@@ -15,14 +15,17 @@ const MIN_QUERY_LENGTH = 3
 export function useGeocodeSuggestions(query: string, enabled: boolean) {
   const [suggestions, setSuggestions] = useState<Place[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [searchedQuery, setSearchedQuery] = useState<string | null>(null)
   const controller = useRef<AbortController | null>(null)
 
-  const active = enabled && query.trim().length >= MIN_QUERY_LENGTH
+  const trimmed = query.trim()
+  const active = enabled && trimmed.length >= MIN_QUERY_LENGTH
 
   useEffect(() => {
     if (!active) return
 
-    const trimmed = query.trim()
+    const lookup = trimmed
     const timer = window.setTimeout(async () => {
       controller.current?.abort()
       const next = new AbortController()
@@ -30,20 +33,35 @@ export function useGeocodeSuggestions(query: string, enabled: boolean) {
 
       setLoading(true)
       try {
-        setSuggestions(await geocode(trimmed, next.signal))
-      } catch (error) {
-        if ((error as Error).name !== 'AbortError') setSuggestions([])
+        const results = await geocode(lookup, next.signal)
+        if (next.signal.aborted) return
+        setSuggestions(results)
+        setError(null)
+        setSearchedQuery(lookup)
+      } catch (caught) {
+        if ((caught as Error).name === 'AbortError') return
+        setSuggestions([])
+        setError('Place search failed. Try a city and state, or paste coordinates like 41.88, -87.63.')
+        setSearchedQuery(lookup)
       } finally {
         if (!next.signal.aborted) setLoading(false)
       }
     }, DEBOUNCE_MS)
 
     return () => window.clearTimeout(timer)
-  }, [query, active])
+  }, [trimmed, active])
 
   useEffect(() => () => controller.current?.abort(), [])
 
-  // Stale results are filtered out during render rather than cleared from an
-  // effect, so a too-short query never shows the previous query's matches.
-  return active ? { suggestions, loading } : { suggestions: [], loading: false }
+  if (!active) {
+    return { suggestions: [] as Place[], loading: false, error: null as string | null, empty: false }
+  }
+
+  const settled = searchedQuery === trimmed
+  return {
+    suggestions,
+    loading,
+    error: settled ? error : null,
+    empty: settled && !loading && !error && suggestions.length === 0,
+  }
 }

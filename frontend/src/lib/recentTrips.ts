@@ -60,5 +60,6 @@ export function formFromRecent(trip: RecentTrip): TripFormValues {
     departure: toLocalInputValue(hoursFromNow(2)),
     loadLb: trip.loadLb,
     intervalMiles: trip.intervalMiles,
+    demoLoadWind: false,
   }
 }

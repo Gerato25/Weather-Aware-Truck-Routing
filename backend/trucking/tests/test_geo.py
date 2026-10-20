@@ -141,16 +141,47 @@ class SamplingTests(SimpleTestCase):
         self.assertAlmostEqual(meters_to_miles(checkpoints[-1].distance_m), 2000.0, places=2)
 
     def test_near_duplicate_final_checkpoint_is_collapsed(self):
-        # 100.5 miles at a 50-mile interval would otherwise end 0.5 miles after
-        # the third checkpoint.
-        profile = self.build(100.5, 2.0)
+        # Only collapse when the leftover is under 0.5 miles.
+        profile = self.build(100.2, 2.0)
         checkpoints = profile.sample(miles_to_meters(50.0))
-        spacing = meters_to_miles(checkpoints[-1].distance_m - checkpoints[-2].distance_m)
-        self.assertGreater(spacing, 12.5)
+        miles = [round(meters_to_miles(cp.distance_m), 2) for cp in checkpoints]
+        self.assertEqual(miles[-1], 100.2)
+        self.assertEqual(miles[-2], 50.0)
+
+    def test_destination_is_kept_when_leftover_is_a_real_stretch(self):
+        profile = self.build(1005.0, 18.0)
+        checkpoints = profile.sample(miles_to_meters(25.0))
+        miles = [round(meters_to_miles(cp.distance_m), 1) for cp in checkpoints]
+        self.assertEqual(miles[-1], 1005.0)
+        self.assertEqual(miles[-2], 1000.0)
+        self.assertEqual(len(checkpoints), 42)
 
     def test_rejects_non_positive_interval(self):
         with self.assertRaises(ValueError):
             self.build(100.0, 2.0).sample(0)
+
+    def test_checkpoints_follow_the_polyline_not_the_chord(self):
+        # L-shaped route: east then north. The halfway point is the corner,
+        # not the straight-line midpoint between origin and destination.
+        coords = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+        profile = profile_from_edge_durations(coords, [1.0, 1.0])
+        checkpoints = profile.sample(profile.total_m / 2)
+
+        self.assertEqual(len(checkpoints), 3)
+        self.assertAlmostEqual(checkpoints[0].lon, 0.0, places=5)
+        self.assertAlmostEqual(checkpoints[0].lat, 0.0, places=5)
+        self.assertAlmostEqual(checkpoints[1].lon, 1.0, places=4)
+        self.assertAlmostEqual(checkpoints[1].lat, 0.0, places=3)
+        self.assertAlmostEqual(checkpoints[-1].lon, 1.0, places=5)
+        self.assertAlmostEqual(checkpoints[-1].lat, 1.0, places=5)
+        chord_mid = (0.5, 0.5)
+        self.assertGreater(haversine_m(checkpoints[1].coord, chord_mid), 40_000)
+
+    def test_sampled_points_stay_on_the_geometry(self):
+        profile = self.build(100.0, 2.0)
+        for cp in profile.sample(miles_to_meters(25.0)):
+            expected, _ = profile.at_distance(cp.distance_m)
+            self.assertLess(haversine_m(expected, cp.coord), 5.0)
 
 
 class SimplifyTests(SimpleTestCase):
