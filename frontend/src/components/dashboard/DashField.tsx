@@ -33,4 +33,4 @@ export function DashField({ label, htmlFor, icon, trailing, children }: DashFiel
 }
 
 export const dashControlClass =
-  'dash-control h-full w-full min-w-0 border-0 bg-transparent p-0 text-sm leading-none text-slate-900 shadow-none outline-none ring-0 [color-scheme:light]'
+  'dash-control h-full w-full min-w-0 border-0 bg-transparent p-0 text-sm leading-none text-slate-900 shadow-none outline-none ring-0'

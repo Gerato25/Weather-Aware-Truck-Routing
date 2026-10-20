@@ -34,8 +34,8 @@ export function AppHeader({ page, theme, onTheme, onNavigate, originWeather }: A
           </svg>
         </span>
         <div>
-          <h1>Spotter</h1>
-          <p>Safer routes. Smarter decisions.</p>
+          <h1>WeatherRoute</h1>
+          <p>Truck Route Intelligence</p>
         </div>
       </a>
 

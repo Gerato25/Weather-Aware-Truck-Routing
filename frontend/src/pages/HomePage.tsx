@@ -91,13 +91,13 @@ export function HomePage({
         <div className="home">
           <div className="home-hero-copy">
             <h2>
-              Weather-Aware
+              Weather-aware
               <br />
-              Truck <em>Routing</em>
+              truck <em>routing</em>
             </h2>
             <p className="home-lead">
-              Get the safest and most reliable route by considering weather, load weight and travel
-              time.
+              Compare three live corridors, score wind, rain, and snow at each checkpoint ETA, and
+              take the safest route for your load.
             </p>
           </div>
 
@@ -110,7 +110,7 @@ export function HomePage({
           >
             <LocationInput
               label="Origin"
-              placeholder="Enter origin (e.g. Chicago, IL)"
+              placeholder="Enter origin (e.g. Denver, CO)"
               value={form.origin}
               resolved={form.originPlace}
               onChange={(value) => onFormChange('origin', value)}
@@ -118,7 +118,7 @@ export function HomePage({
             />
             <LocationInput
               label="Destination"
-              placeholder="Enter destination (e.g. Denver, CO)"
+              placeholder="Enter destination (e.g. Glenwood Springs, CO)"
               value={form.destination}
               resolved={form.destinationPlace}
               onChange={(value) => onFormChange('destination', value)}
@@ -210,7 +210,7 @@ export function HomePage({
         </section>
       </div>
 
-      <footer className="home-foot">Drive safer. Plan smarter. · Weather-Aware Truck Routing</footer>
+      <footer className="home-foot">Drive safer. Plan smarter. · WeatherRoute</footer>
     </div>
   )
 }

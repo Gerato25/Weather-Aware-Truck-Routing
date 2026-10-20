@@ -14,16 +14,18 @@ import {
   Search,
   Snowflake,
   Thermometer,
-  Truck,
   Weight,
   Wind,
 } from 'lucide-react'
 
+import { AppHeader } from '../components/AppHeader'
 import { DashField, dashControlClass } from '../components/dashboard/DashField'
 import { MapView } from '../components/MapView'
 import { PlaceField } from '../components/dashboard/PlaceField'
 import { RiskBadge } from '../components/dashboard/RiskBadge'
 import type { useTripSession } from '../hooks/useTripSession'
+import type { Page } from '../lib/navigation'
+import type { Theme } from '../lib/theme'
 import { corridorHourStats, levelFromScore } from '../lib/corridorHour'
 import {
   formatDateTime,
@@ -50,6 +52,9 @@ type Session = ReturnType<typeof useTripSession>
 
 interface DashboardPageProps {
   session: Session
+  theme: Theme
+  onTheme: (theme: Theme) => void
+  onNavigate: (page: Page, hash?: string) => void
 }
 
 const INTERVALS: Array<10 | 25 | 50> = [10, 25, 50]
@@ -96,7 +101,7 @@ function recommendationWhy(plan: PlanResponse): string {
   return reason ?? RANKING_ORDER
 }
 
-export function DashboardPage({ session }: DashboardPageProps) {
+export function DashboardPage({ session, theme, onTheme, onNavigate }: DashboardPageProps) {
   const {
     form,
     updateField,
@@ -119,13 +124,13 @@ export function DashboardPage({ session }: DashboardPageProps) {
   const [weatherOverlay, setWeatherOverlay] = useState<WeatherOverlay>('rain')
   const [hiddenRouteIds, setHiddenRouteIds] = useState<string[]>([])
   const [rasterAvailable, setRasterAvailable] = useState(false)
-  const [forecastPlaying, setForecastPlaying] = useState(() => Boolean(plan))
+  const [forecastPlaying, setForecastPlaying] = useState(false)
 
   useEffect(() => {
     setHiddenRouteIds([])
     setOverlayOn(true)
     setWeatherOverlay('rain')
-    setForecastPlaying(Boolean(plan))
+    setForecastPlaying(false)
   }, [plan?.generated_at])
 
   const revealRoute = useCallback(
@@ -191,21 +196,8 @@ export function DashboardPage({ session }: DashboardPageProps) {
   const fill = sliderMax === 0 ? 0 : (Math.min(heatHour, sliderMax) / sliderMax) * 100
 
   return (
-    <div className="min-h-screen bg-[#e8eef4] text-slate-800">
-      <header className="bg-[#0b1f3a] text-white">
-        <div className={`${SHELL} flex items-center justify-between py-3`}>
-          <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-white/10">
-              <Truck className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-base font-semibold leading-none tracking-tight">WeatherRoute</p>
-              <p className="mt-1 text-[11px] text-slate-300">Truck Route Intelligence</p>
-            </div>
-          </div>
-          <p className="hidden text-sm text-slate-300 sm:block">Safer routes. Smarter decisions.</p>
-        </div>
-      </header>
+    <div className="dash-app min-h-screen">
+      <AppHeader page="planner" theme={theme} onTheme={onTheme} onNavigate={onNavigate} />
 
       <main className={`${SHELL} space-y-4 py-4 sm:py-5`}>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
@@ -369,7 +361,7 @@ export function DashboardPage({ session }: DashboardPageProps) {
 
           <section className="dash-map relative min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:min-h-[580px] xl:min-h-[calc(100vh-7.5rem)]">
             <MapView
-              theme="light"
+              theme={theme}
               className="dash-map"
               routes={plan?.routes ?? []}
               selectedRouteId={selectedRouteId}
