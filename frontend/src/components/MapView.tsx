@@ -29,13 +29,13 @@ import {
   timeStepForHour,
 } from '../lib/omWeather'
 import {
-  DEFAULT_HEAT_LAYERS,
   HEAT_LAYER_KEYS,
   RISK_COLORS,
   riskColor,
   routeColor,
   type HeatLayers,
 } from '../lib/risk'
+import { routeLetter } from '../lib/routeMeta'
 import { MAP_STYLES, type Theme } from '../lib/theme'
 import type { Checkpoint, CorridorResponse, Place, Route } from '../types'
 
@@ -81,6 +81,7 @@ interface MapViewProps {
   heatHour: number
   heatLayers: HeatLayers
   focused: CheckpointRef | null
+  panToFocused?: boolean
   hiddenRouteIds?: string[]
   basemap?: 'map' | 'satellite'
   hideEmpty?: boolean
@@ -208,11 +209,12 @@ function checkpointsToGeoJSON(
   heatHour: number,
 ): FeatureCollection {
   const features: Feature[] = []
-  for (const route of routes) {
-    if (hiddenIds.has(route.id)) continue
+  routes.forEach((route, routeIndex) => {
+    if (hiddenIds.has(route.id)) return
     const selected = route.id === selectedRouteId
+    const letter = routeLetter(routeIndex)
     for (const cp of route.checkpoints) {
-      const name = checkpointName(route, cp, origin, destination)
+      const name = `${checkpointName(route, cp, origin, destination)} (Route ${letter})`
       const forecastLevel = corridorRiskAt(corridor, cp.lon, cp.lat, heatHour)
       features.push({
         type: 'Feature',
@@ -227,7 +229,7 @@ function checkpointsToGeoJSON(
         },
       })
     }
-  }
+  })
   return { type: 'FeatureCollection', features }
 }
 
@@ -258,38 +260,33 @@ function popupNumber(value: number | null | undefined, digits: number, suffix: s
 function checkpointPopupHtml(cp: Checkpoint, name?: string): string {
   const { weather, risk } = cp
   const title = name || `Mile ${Math.round(cp.mile)}`
-  const reasons = risk.reasons.length
-    ? `<ul class="popup-reasons">${risk.reasons
-        .map((reason) => `<li>${escapeHtml(reason)}</li>`)
-        .join('')}</ul>`
-    : risk.available !== false
-      ? '<p class="popup-reasons">All conditions within Low thresholds.</p>'
-      : '<p class="popup-reasons">Weather data was unavailable; this checkpoint was not scored as Low.</p>'
+  const wind = popupNumber(weather.wind_mph, 0, ' mph')
+  const gusts =
+    weather.wind_gust_mph == null || Number.isNaN(weather.wind_gust_mph)
+      ? ''
+      : ` (gusts ${Math.round(weather.wind_gust_mph)})`
+  const reason = risk.reasons[0]
+    ? escapeHtml(risk.reasons[0])
+    : risk.available === false
+      ? 'Weather data was unavailable; this checkpoint was not scored as Low.'
+      : 'All conditions within Low thresholds.'
 
   return `
     <div class="popup">
       <div class="popup-head" style="--level-color:${riskColor(risk.level)}">
-        <span class="popup-badge">${escapeHtml(risk.label)}</span>
         <span class="popup-mile">${escapeHtml(title)}</span>
       </div>
-      <div class="popup-eta">ETA ${escapeHtml(formatClock(cp.eta))}</div>
       <dl class="popup-grid">
-        <div><dt>Wind</dt><dd>${popupNumber(weather.wind_mph, 0, ' mph')}</dd></div>
-        <div><dt>Gusts</dt><dd>${popupNumber(weather.wind_gust_mph, 0, ' mph')}</dd></div>
+        <div><dt>ETA</dt><dd>${escapeHtml(formatClock(cp.eta))}</dd></div>
+        <div><dt>Wind</dt><dd>${wind}${wind === '—' ? '' : gusts}</dd></div>
         <div><dt>Rain</dt><dd>${popupNumber(weather.rain_in_hr, 2, ' in/hr')}</dd></div>
-        <div><dt>Snow</dt><dd>${popupNumber(weather.snow_in_hr, 2, ' in/hr')}</dd></div>
-        ${
-          weather.temperature_f === null
-            ? ''
-            : `<div><dt>Temp</dt><dd>${weather.temperature_f.toFixed(0)}&deg;F</dd></div>`
-        }
-        ${
-          weather.visibility_mi === null
-            ? ''
-            : `<div><dt>Visibility</dt><dd>${weather.visibility_mi.toFixed(1)} mi</dd></div>`
-        }
+        <div><dt>Snow</dt><dd>${popupNumber(weather.snow_in_hr, 1, ' in/hr')}</dd></div>
+        <div><dt>Temp</dt><dd>${popupNumber(weather.temperature_f, 0, '°F')}</dd></div>
       </dl>
-      ${reasons}
+      <p class="popup-risk" style="--level-color:${riskColor(risk.level)}">
+        <strong>${escapeHtml(risk.label)}</strong>
+        <span>Reason: ${reason}</span>
+      </p>
     </div>
   `
 }
@@ -312,6 +309,10 @@ function tuneDarkBasemap(map: MapLibreMap) {
   }
 }
 
+function addLayer(map: MapLibreMap, layer: Parameters<MapLibreMap['addLayer']>[0]) {
+  if (!map.getLayer(layer.id)) map.addLayer(layer)
+}
+
 function installWeatherRasters(map: MapLibreMap, timeStep: string) {
   for (const metric of HEAT_LAYER_KEYS) {
     const sourceId = OM_SOURCE_IDS[metric]
@@ -319,15 +320,13 @@ function installWeatherRasters(map: MapLibreMap, timeStep: string) {
     if (!map.getSource(sourceId)) {
       map.addSource(sourceId, { type: 'raster', url: omTileUrl(metric, timeStep) })
     }
-    if (!map.getLayer(layerId)) {
-      map.addLayer({
-        id: layerId,
-        type: 'raster',
-        source: sourceId,
-        layout: { visibility: 'none' },
-        paint: { 'raster-opacity': 0.38, 'raster-fade-duration': 0 },
-      })
-    }
+    addLayer(map, {
+      id: layerId,
+      type: 'raster',
+      source: sourceId,
+      layout: { visibility: 'none' },
+      paint: { 'raster-opacity': 0.38, 'raster-fade-duration': 0 },
+    })
   }
 }
 
@@ -335,11 +334,15 @@ function installWeatherRasters(map: MapLibreMap, timeStep: string) {
 function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
   installWeatherRasters(map, 'current_time_1H')
   for (const name of Object.values(SOURCES)) {
-    map.addSource(name, { type: 'geojson', data: EMPTY_COLLECTION })
+    if (!map.getSource(name)) {
+      map.addSource(name, { type: 'geojson', data: EMPTY_COLLECTION })
+    }
   }
   for (const metric of HEAT_LAYER_KEYS) {
-    map.addSource(HEAT_SOURCE_IDS[metric], { type: 'geojson', data: EMPTY_COLLECTION })
-    map.addLayer({
+    if (!map.getSource(HEAT_SOURCE_IDS[metric])) {
+      map.addSource(HEAT_SOURCE_IDS[metric], { type: 'geojson', data: EMPTY_COLLECTION })
+    }
+    addLayer(map, {
       id: HEAT_LAYER_IDS[metric],
       type: 'circle',
       source: HEAT_SOURCE_IDS[metric],
@@ -374,7 +377,7 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     })
   }
 
-  map.addLayer({
+  addLayer(map, {
     id: LAYERS.routeCasing,
     type: 'line',
     source: SOURCES.routes,
@@ -394,7 +397,7 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     },
   })
 
-  map.addLayer({
+  addLayer(map, {
     id: LAYERS.routeLine,
     type: 'line',
     source: SOURCES.routes,
@@ -414,7 +417,7 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     },
   })
 
-  map.addLayer({
+  addLayer(map, {
     id: LAYERS.checkpointHalo,
     type: 'circle',
     source: SOURCES.checkpoints,
@@ -430,7 +433,7 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     },
   })
 
-  map.addLayer({
+  addLayer(map, {
     id: LAYERS.checkpointDot,
     type: 'circle',
     source: SOURCES.checkpoints,
@@ -451,7 +454,7 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     },
   })
 
-  map.addLayer({
+  addLayer(map, {
     id: LAYERS.endpointDot,
     type: 'circle',
     source: SOURCES.endpoints,
@@ -463,7 +466,7 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     },
   })
 
-  map.addLayer({
+  addLayer(map, {
     id: LAYERS.endpointLabel,
     type: 'symbol',
     source: SOURCES.endpoints,
@@ -472,7 +475,6 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
       'text-size': 11,
       'text-offset': [0, 1.4],
       'text-anchor': 'top',
-        'text-font': ['Noto Sans Regular'],
     },
     paint: {
       'text-color': theme === 'light' ? '#0f172a' : '#e2e8f0',
@@ -548,6 +550,7 @@ export function MapView({
   heatHour,
   heatLayers,
   focused,
+  panToFocused = true,
   hiddenRouteIds = [],
   basemap = 'map',
   hideEmpty = false,
@@ -565,6 +568,8 @@ export function MapView({
   const popupRef = useRef<Popup | null>(null)
   const [ready, setReady] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
+  const [styleEpoch, setStyleEpoch] = useState(0)
+  const lastFitKey = useRef<string | null>(null)
 
   // Keep the latest callbacks reachable from listeners bound once on load.
   const selectRouteRef = useRef(onSelectRoute)
@@ -606,6 +611,13 @@ export function MapView({
     [corridor],
   )
   const [omTimes, setOmTimes] = useState<string[]>([])
+  const themeRef = useRef(theme)
+  const layersRef = useRef(heatLayers)
+  const styleRef = useRef(MAP_STYLES[theme])
+  const dataRef = useRef({ routeData, checkpointData, endpointData, heatData })
+  themeRef.current = theme
+  layersRef.current = heatLayers
+  dataRef.current = { routeData, checkpointData, endpointData, heatData }
 
   function showPopup(map: MapLibreMap, coordinates: [number, number], html: string) {
     popupRef.current?.remove()
@@ -618,13 +630,29 @@ export function MapView({
     if (source instanceof GeoJSONSource) source.setData(data)
   }
 
+  function hydrateMap(map: MapLibreMap) {
+    if (themeRef.current === 'dark') tuneDarkBasemap(map)
+    installLayers(map, themeRef.current, layersRef.current)
+    const data = dataRef.current
+    const routes = map.getSource(SOURCES.routes)
+    if (routes instanceof GeoJSONSource) routes.setData(data.routeData)
+    const checkpoints = map.getSource(SOURCES.checkpoints)
+    if (checkpoints instanceof GeoJSONSource) checkpoints.setData(data.checkpointData)
+    const endpoints = map.getSource(SOURCES.endpoints)
+    if (endpoints instanceof GeoJSONSource) endpoints.setData(data.endpointData)
+    for (const metric of HEAT_LAYER_KEYS) {
+      const heat = map.getSource(HEAT_SOURCE_IDS[metric])
+      if (heat instanceof GeoJSONSource) heat.setData(data.heatData[metric])
+    }
+  }
+
   // --- map construction ---------------------------------------------------
   useEffect(() => {
     if (!containerRef.current) return
 
     const map = new MapLibreMap({
       container: containerRef.current,
-      style: MAP_STYLES[theme],
+      style: MAP_STYLES[themeRef.current],
       center: worldView ? [10, 18] : [-96, 39],
       zoom: worldView ? 1.55 : 3.4,
       attributionControl: false,
@@ -651,8 +679,7 @@ export function MapView({
 
     map.on('load', () => {
       map.resize()
-      if (theme === 'dark') tuneDarkBasemap(map)
-      installLayers(map, theme, DEFAULT_HEAT_LAYERS)
+      hydrateMap(map)
       installInteractions(map, {
         onCheckpointClick: (ref, coordinates, html) => {
           selectRouteRef.current(ref.routeId)
@@ -681,9 +708,33 @@ export function MapView({
       popupRef.current?.remove()
       map.remove()
       mapRef.current = null
+      lastFitKey.current = null
       setReady(false)
     }
-  }, [theme, worldView])
+  }, [worldView])
+
+  useEffect(() => {
+    const map = mapRef.current
+    const nextStyle = MAP_STYLES[theme]
+    if (!map || styleRef.current === nextStyle) return
+    styleRef.current = nextStyle
+    const keepCamera = map.isStyleLoaded()
+    const camera = keepCamera
+      ? {
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        }
+      : null
+    map.setStyle(nextStyle)
+    map.once('style.load', () => {
+      hydrateMap(map)
+      if (camera) map.jumpTo(camera)
+      map.resize()
+      setStyleEpoch((value) => value + 1)
+    })
+  }, [theme])
 
   // --- data updates -------------------------------------------------------
   useEffect(() => {
@@ -733,7 +784,7 @@ export function MapView({
         source.setUrl(omTileUrl(metric, step))
       }
     }
-  }, [ready, heatHour, omTimes, corridor])
+  }, [ready, heatHour, omTimes, corridor, theme, styleEpoch])
 
   useEffect(() => {
     const map = mapRef.current
@@ -743,7 +794,7 @@ export function MapView({
       if (!map.getLayer(layerId)) continue
       map.setPaintProperty(layerId, 'circle-color', heatColorExpression(heatHour, metric))
     }
-  }, [ready, heatHour])
+  }, [ready, heatHour, theme, styleEpoch])
 
   useEffect(() => {
     const map = mapRef.current
@@ -766,7 +817,7 @@ export function MapView({
         map.setPaintProperty(rasterId, 'raster-opacity', rasterOpacity)
       }
     }
-  }, [ready, heatLayers, weatherRaster, omTimes, rasterOpacity, corridor])
+  }, [ready, heatLayers, weatherRaster, omTimes, rasterOpacity, corridor, theme, styleEpoch])
 
   useEffect(() => {
     const map = mapRef.current
@@ -796,15 +847,13 @@ export function MapView({
       return
     }
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-  }, [ready, basemap])
+  }, [ready, basemap, styleEpoch])
 
   // --- camera -------------------------------------------------------------
   const fitKey = useMemo(
     () => `${routes.map((route) => route.id).join('|')}|${origin?.label ?? ''}|${destination?.label ?? ''}`,
     [routes, origin, destination],
   )
-  const lastFitKey = useRef<string | null>(null)
-
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || !routes.length) return
@@ -826,7 +875,7 @@ export function MapView({
   // Flying to a checkpoint picked from the inspector list or another route.
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map || !focused) return
+    if (!ready || !map || !focused || !panToFocused) return
     const route = routes.find((item) => item.id === focused.routeId)
     if (!route) return
 
@@ -839,7 +888,7 @@ export function MapView({
       [cp.lon, cp.lat],
       checkpointPopupHtml(cp, checkpointName(route, cp, origin, destination)),
     )
-  }, [ready, focused, routes, origin, destination])
+  }, [ready, focused, panToFocused, routes, origin, destination])
 
   return (
     <div className={['map-shell', className].filter(Boolean).join(' ')}>

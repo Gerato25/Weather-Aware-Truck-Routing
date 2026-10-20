@@ -69,6 +69,15 @@ export function nearestCorridorIndex(
   return best
 }
 
+function cellAt(
+  rows: (number | null)[][] | undefined,
+  index: number,
+  hour: number,
+): number | null {
+  const value = rows?.[index]?.[hour]
+  return value == null || !Number.isFinite(value) ? null : value
+}
+
 export function corridorRiskAt(
   corridor: CorridorResponse | null,
   lon: number,
@@ -78,4 +87,42 @@ export function corridorRiskAt(
   if (!corridor?.points.length || !corridor.risk.length) return null
   const index = nearestCorridorIndex(corridor.points, lon, lat)
   return levelFromScore(corridor.risk[index]?.[hour])
+}
+
+/** Forecast values at the corridor sample nearest a checkpoint, for one overlay hour. */
+export function corridorSampleAt(
+  corridor: CorridorResponse | null,
+  lon: number,
+  lat: number,
+  hour: number,
+): CorridorHourStats & { level: RiskDisplaySlug } | null {
+  if (!corridor?.points.length) return null
+  const index = nearestCorridorIndex(corridor.points, lon, lat)
+  const risk = cellAt(corridor.risk, index, hour)
+  return {
+    wind: cellAt(corridor.wind, index, hour),
+    rain: cellAt(corridor.rain, index, hour),
+    snow: cellAt(corridor.snow, index, hour),
+    temp: cellAt(corridor.temperature, index, hour),
+    risk,
+    level: levelFromScore(risk),
+  }
+}
+
+export interface CorridorRiskStop {
+  t: number
+  level: RiskDisplaySlug
+}
+
+/** Ordered risk colors along the corridor at one forecast hour, for the distance bar. */
+export function corridorRiskStops(
+  corridor: CorridorResponse | null,
+  hour: number,
+): CorridorRiskStop[] {
+  if (!corridor?.points.length || !corridor.risk.length) return []
+  const last = Math.max(1, corridor.points.length - 1)
+  return corridor.points.map((_, index) => ({
+    t: index / last,
+    level: levelFromScore(corridor.risk[index]?.[hour]),
+  }))
 }
