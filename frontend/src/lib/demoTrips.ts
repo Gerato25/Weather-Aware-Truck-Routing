@@ -1,11 +1,12 @@
 import { hoursFromNow, toLocalInputValue } from './format'
 import type { TripFormValues } from '../types'
 
+/** I-70 over the high Rockies: live 0–48h overlay currently has wind, rain, and snow. */
 export const INITIAL_FORM: TripFormValues = {
-  origin: 'Chicago, IL',
-  destination: 'Denver, CO',
-  originPlace: null,
-  destinationPlace: null,
+  origin: 'Denver, CO',
+  destination: 'Glenwood Springs, CO',
+  originPlace: { label: 'Denver, CO', lat: 39.7392, lon: -104.9903 },
+  destinationPlace: { label: 'Glenwood Springs, CO', lat: 39.5505, lon: -107.3248 },
   departure: toLocalInputValue(hoursFromNow(2)),
   loadLb: 42_000,
   intervalMiles: 25,
@@ -23,31 +24,31 @@ export interface DemoTrip {
 
 export const DEMO_TRIPS: DemoTrip[] = [
   {
-    id: 'chi-den-heavy',
+    id: 'den-gws-heavy',
     title: 'Heavy haul',
-    origin: 'Chicago, IL',
-    destination: 'Denver, CO',
+    origin: 'Denver, CO',
+    destination: 'Glenwood Springs, CO',
     loadLb: 42_000,
     intervalMiles: 25,
-    why: '42,000 lb crosses both load-rule thresholds, so a 35–54 mph stretch can flip the ranking.',
+    why: 'I-70 through Eisenhower and Vail currently carries wind, rain, and snow on the overlay.',
   },
   {
-    id: 'chi-den-light',
+    id: 'den-gws-light',
     title: 'Light load',
-    origin: 'Chicago, IL',
-    destination: 'Denver, CO',
+    origin: 'Denver, CO',
+    destination: 'Glenwood Springs, CO',
     loadLb: 15_000,
     intervalMiles: 25,
-    why: 'Same corridor at 15,000 lb — wind stays in its weather band instead of escalating.',
+    why: 'Same mountain corridor at 15,000 lb — wind stays in its weather band instead of escalating.',
   },
   {
-    id: 'chi-phl',
-    title: 'Lakes to coast',
+    id: 'chi-den-heavy',
+    title: 'Plains haul',
     origin: 'Chicago, IL',
-    destination: 'Philadelphia, PA',
+    destination: 'Denver, CO',
     loadLb: 42_000,
     intervalMiles: 25,
-    why: 'A longer eastbound run where the three corridors often split on rain vs wind.',
+    why: 'A longer plains run where the three corridors often split on rain vs wind.',
   },
 ]
 

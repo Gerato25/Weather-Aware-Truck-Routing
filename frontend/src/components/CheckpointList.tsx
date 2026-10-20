@@ -64,9 +64,13 @@ export function CheckpointList({ route, focused, onFocus }: CheckpointListProps)
                   <span className="checkpoint-mile">{Math.round(cp.mile)} mi</span>
                   <span className="checkpoint-eta">{formatClock(cp.eta)}</span>
                   <span className="checkpoint-wx">
-                    {Math.round(cp.weather.wind_mph)}/{Math.round(cp.weather.wind_gust_mph)} mph
-                    {cp.weather.snow_in_hr > 0.05 && ` · ${cp.weather.snow_in_hr.toFixed(1)}" snow`}
-                    {cp.weather.rain_in_hr > 0.05 && ` · ${cp.weather.rain_in_hr.toFixed(2)}" rain`}
+                    {cp.weather.wind_mph == null ? '—' : `${Math.round(cp.weather.wind_mph)} mph`}
+                    {cp.weather.snow_in_hr != null &&
+                      cp.weather.snow_in_hr > 0.05 &&
+                      ` · ${cp.weather.snow_in_hr.toFixed(1)}" snow`}
+                    {cp.weather.rain_in_hr != null &&
+                      cp.weather.rain_in_hr > 0.05 &&
+                      ` · ${cp.weather.rain_in_hr.toFixed(2)}" rain`}
                   </span>
                   <span className="checkpoint-risk">{cp.risk.label}</span>
                 </button>

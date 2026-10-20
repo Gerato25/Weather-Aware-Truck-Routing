@@ -55,9 +55,9 @@ export function CheckpointGallery({
                 </span>
               </span>
               <span className="checkpoint-card-wx">
-                Wind {Math.round(cp.weather.wind_mph)} mph
+                Wind {cp.weather.wind_mph == null ? '—' : `${Math.round(cp.weather.wind_mph)} mph`}
                 <br />
-                Rain {cp.weather.rain_in_hr.toFixed(2)} in/hr
+                Rain {cp.weather.rain_in_hr == null ? '—' : `${cp.weather.rain_in_hr.toFixed(2)} in/hr`}
               </span>
               <span className="forecast-risk">{cp.risk.label}</span>
             </button>

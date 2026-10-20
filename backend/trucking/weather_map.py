@@ -75,9 +75,9 @@ def _hours(anchor: datetime, count: int) -> list[datetime]:
 
 def _sample_row(forecast: PointForecast, timestamps: list[datetime], load_lb: float, wind_metric: str):
     risk: list[int] = []
-    wind: list[float] = []
-    rain: list[float] = []
-    snow: list[float] = []
+    wind: list[float | None] = []
+    rain: list[float | None] = []
+    snow: list[float | None] = []
     temp: list[float | None] = []
     for ts in timestamps:
         sample = forecast.sample_at(ts.timestamp())
@@ -91,7 +91,8 @@ def _sample_row(forecast: PointForecast, timestamps: list[datetime], load_lb: fl
                 wind_metric,
             )
         )
-        wind.append(round(sample.effective_wind(wind_metric), 1))
+        wind_mph = sample.effective_wind(wind_metric)
+        wind.append(None if wind_mph is None else round(wind_mph, 1))
         rain.append(sample.rain_in_hr)
         snow.append(sample.snow_in_hr)
         temp.append(sample.temperature_f)
@@ -158,7 +159,8 @@ def _extras(forecast: PointForecast, ts: float) -> dict:
     def series(values: list[float]) -> float | None:
         if not values:
             return None
-        return round(forecast._interpolate(values, i, j, frac), 1)
+        value = forecast._interpolate(values, i, j, frac)
+        return None if value is None else round(value, 1)
 
     humidity = series(forecast.humidity)
     dewpoint = series(forecast.dewpoint)

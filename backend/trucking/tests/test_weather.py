@@ -64,3 +64,27 @@ class OpenMeteoRetryTests(SimpleTestCase):
             with self.assertRaises(UpstreamError):
                 client.forecasts([(-87.63, 41.88)], forecast_days=2)
         self.assertEqual(request.call_count, 1)
+
+
+class OpenMeteoParseTests(SimpleTestCase):
+    def test_null_hourly_values_stay_missing_instead_of_becoming_zero(self):
+        forecast = OpenMeteoClient._parse(
+            (-87.63, 41.88),
+            {
+                "hourly": {
+                    "time": [1_700_000_000, 1_700_003_600],
+                    "wind_speed_10m": [None, None],
+                    "wind_gusts_10m": [None, None],
+                    "rain": [None, None],
+                    "showers": [None, None],
+                    "snowfall": [None, None],
+                    "temperature_2m": [None, None],
+                    "visibility": [None, None],
+                    "weather_code": [None, None],
+                }
+            },
+        )
+        sample = forecast.sample_at(1_700_000_000)
+        self.assertFalse(sample.has_observation())
+        self.assertIsNone(sample.wind_mph)
+        self.assertIsNone(sample.rain_in_hr)

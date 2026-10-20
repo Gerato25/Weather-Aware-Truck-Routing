@@ -5,7 +5,9 @@ interface RouteConditionsProps {
 }
 
 export function RouteConditions({ route }: RouteConditionsProps) {
-  const winds = route.checkpoints.map((cp) => cp.weather.wind_mph)
+  const winds = route.checkpoints
+    .map((cp) => cp.weather.wind_mph)
+    .filter((value): value is number => value !== null)
   const temps = route.checkpoints
     .map((cp) => cp.weather.temperature_f)
     .filter((value): value is number => value !== null)

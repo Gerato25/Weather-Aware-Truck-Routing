@@ -87,7 +87,7 @@ export function RecommendationPanel({ plan, compact = false, onSelect }: Recomme
       {!compact && (
       <table className="ranking">
         <caption>
-          Ranked by No Travel, then severe miles, then high miles, then average risk, then drive time
+          Ranked by No Travel miles, then Severe, High, average risk, then time
         </caption>
         <thead>
           <tr>
@@ -112,7 +112,9 @@ export function RecommendationPanel({ plan, compact = false, onSelect }: Recomme
               </th>
               <td>{Math.round(entry.severe_miles)}</td>
               <td>{Math.round(entry.high_miles)}</td>
-              <td style={{ color: scoreColor(entry.average_risk) }}>{entry.average_risk.toFixed(2)}</td>
+              <td style={{ color: scoreColor(entry.average_risk) }}>
+                {entry.average_risk == null ? '—' : entry.average_risk.toFixed(2)}
+              </td>
               <td>{formatDuration(entry.duration_hours)}</td>
             </tr>
           ))}

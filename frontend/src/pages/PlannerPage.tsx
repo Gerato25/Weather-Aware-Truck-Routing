@@ -11,8 +11,9 @@ import { RouteCard } from '../components/RouteCard'
 import { RouteForecastStrip } from '../components/RouteForecastStrip'
 import { TripForm } from '../components/TripForm'
 import type { useTripSession } from '../hooks/useTripSession'
+import { formatDuration } from '../lib/format'
 import type { Page } from '../lib/navigation'
-import type { HeatMetric } from '../lib/risk'
+import { scoreColor, type HeatMetric } from '../lib/risk'
 import { corridorName, routeBlurb, routeRoles } from '../lib/routeMeta'
 import type { Theme } from '../lib/theme'
 
@@ -41,6 +42,8 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
     setHeatHour,
     heatLayers,
     setHeatLayers,
+    corridor,
+    corridorLoading,
     selectRoute,
   } = session
 
@@ -75,6 +78,7 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
           recommendedRouteId={plan?.recommendation.route_id ?? null}
           origin={plan?.request.origin ?? null}
           destination={plan?.request.destination ?? null}
+          corridor={corridor}
           heatHour={heatHour}
           heatLayers={heatLayers}
           focused={focused}
@@ -84,9 +88,15 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
           onFocusCheckpoint={setFocused}
         />
         <RiskLegend overlay={heatLayers} />
-        <HeatmapBar hour={heatHour} onHourChange={setHeatHour} />
+        <HeatmapBar
+          corridor={corridor}
+          loading={corridorLoading}
+          hour={heatHour}
+          onHourChange={setHeatHour}
+        />
         <MapLayers
           layers={heatLayers}
+          disabled={!corridor}
           onToggle={(metric: HeatMetric, visible) => {
             setHeatLayers((current) => ({ ...current, [metric]: visible }))
           }}
@@ -110,16 +120,6 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
       )}
 
       <aside className="inspector">
-        <button
-          type="submit"
-          form="trip-form"
-          className="primary find-route"
-          disabled={planning || form.origin.trim().length < 2 || form.destination.trim().length < 2}
-        >
-          {planning ? 'Planning…' : 'Find safest route'}
-          {!planning && <span aria-hidden="true"> →</span>}
-        </button>
-
         {plan ? (
           <>
             <header className="inspector-head">
@@ -157,6 +157,54 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
                 )
               })}
             </div>
+            <section className="panel recommendation">
+              <header className="panel-head">
+                <h2>Why this route</h2>
+              </header>
+              <div className="recommend-banner">
+                <strong>{plan.recommendation.label} is recommended</strong>
+                <p>
+                  {plan.recommendation.reasons[0] ??
+                    'Lowest weather risk for this load, then shortest drive time.'}
+                </p>
+              </div>
+              <table className="ranking">
+                <caption>
+                  Ranked by No Travel miles, then Severe, High, average risk, then time
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Route</th>
+                    <th scope="col">No Travel</th>
+                    <th scope="col">Severe</th>
+                    <th scope="col">High</th>
+                    <th scope="col">Avg</th>
+                    <th scope="col">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plan.recommendation.ranking.map((entry, position) => (
+                    <tr
+                      key={entry.route_id}
+                      className={entry.route_id === plan.recommendation.route_id ? 'best' : undefined}
+                      onClick={() => selectRoute(entry.route_id)}
+                    >
+                      <th scope="row">
+                        <span className="rank-position">{position + 1}</span>
+                        {entry.label}
+                      </th>
+                      <td>{Math.round(entry.no_travel_miles)}</td>
+                      <td>{Math.round(entry.severe_miles)}</td>
+                      <td>{Math.round(entry.high_miles)}</td>
+                      <td style={{ color: scoreColor(entry.average_risk) }}>
+                        {entry.average_risk == null ? '—' : entry.average_risk.toFixed(2)}
+                      </td>
+                      <td>{formatDuration(entry.duration_hours)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
             {selectedRoute && (
               <CheckpointList route={selectedRoute} focused={focused} onFocus={setFocused} />
             )}

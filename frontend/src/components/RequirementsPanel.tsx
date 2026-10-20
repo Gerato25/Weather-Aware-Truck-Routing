@@ -18,7 +18,7 @@ export function RequirementsPanel({ intervalMiles, onInterval }: RequirementsPan
         <ul className="req-list">
           <li>Three distinct corridors with distance, drive time, and risk</li>
           <li>Weather at timed checkpoints (ETA, not average speed)</li>
-          <li>0–48h heatmap you can scrub without refetching</li>
+          <li>0–48h corridor heatmap you can scrub without refetching</li>
           <li>A ranked safest pick for this load</li>
         </ul>
       </section>

@@ -68,22 +68,28 @@ class PointForecast:
     lon: float
     lat: float
     times: list[int] = field(default_factory=list)
-    wind: list[float] = field(default_factory=list)
-    gust: list[float] = field(default_factory=list)
-    rain: list[float] = field(default_factory=list)
-    snow: list[float] = field(default_factory=list)
-    temperature: list[float] = field(default_factory=list)
-    humidity: list[float] = field(default_factory=list)
-    dewpoint: list[float] = field(default_factory=list)
-    wind_dir: list[float] = field(default_factory=list)
-    visibility: list[float] = field(default_factory=list)
-    code: list[int] = field(default_factory=list)
+    wind: list[float | None] = field(default_factory=list)
+    gust: list[float | None] = field(default_factory=list)
+    rain: list[float | None] = field(default_factory=list)
+    snow: list[float | None] = field(default_factory=list)
+    temperature: list[float | None] = field(default_factory=list)
+    humidity: list[float | None] = field(default_factory=list)
+    dewpoint: list[float | None] = field(default_factory=list)
+    wind_dir: list[float | None] = field(default_factory=list)
+    visibility: list[float | None] = field(default_factory=list)
+    code: list[int | None] = field(default_factory=list)
 
-    def _interpolate(self, series: list[float], i: int, j: int, frac: float) -> float:
+    def _interpolate(self, series: list[float | None], i: int, j: int, frac: float) -> float | None:
         if not series:
-            return 0.0
-        a = series[i] if i < len(series) and series[i] is not None else 0.0
-        b = series[j] if j < len(series) and series[j] is not None else a
+            return None
+        a = series[i] if i < len(series) else None
+        b = series[j] if j < len(series) else None
+        if a is None and b is None:
+            return None
+        if a is None:
+            return float(b)
+        if b is None:
+            return float(a)
         return float(a) + (float(b) - float(a)) * frac
 
     def _bracket(self, ts: float) -> tuple[int, int, float]:
@@ -111,17 +117,25 @@ class PointForecast:
 
         i, j, frac = self._bracket(ts)
         visibility_m = self._interpolate(self.visibility, i, j, frac) if self.visibility else None
+
+        def _round(value: float | None, digits: int) -> float | None:
+            return None if value is None else round(value, digits)
+
+        code = None
+        if self.code:
+            picked = self.code[j if frac >= 0.5 else i]
+            code = int(picked) if picked is not None else None
+
         return WeatherSample(
-            wind_mph=round(self._interpolate(self.wind, i, j, frac), 1),
-            wind_gust_mph=round(self._interpolate(self.gust, i, j, frac), 1),
-            rain_in_hr=round(self._interpolate(self.rain, i, j, frac), 3),
-            snow_in_hr=round(self._interpolate(self.snow, i, j, frac), 3),
-            temperature_f=round(self._interpolate(self.temperature, i, j, frac), 1)
+            wind_mph=_round(self._interpolate(self.wind, i, j, frac), 1),
+            wind_gust_mph=_round(self._interpolate(self.gust, i, j, frac), 1),
+            rain_in_hr=_round(self._interpolate(self.rain, i, j, frac), 3),
+            snow_in_hr=_round(self._interpolate(self.snow, i, j, frac), 3),
+            temperature_f=_round(self._interpolate(self.temperature, i, j, frac), 1)
             if self.temperature
             else None,
             visibility_mi=round(visibility_m / 1609.344, 1) if visibility_m else None,
-            # Weather code is categorical: snap to the nearer hour.
-            weather_code=int(self.code[j if frac >= 0.5 else i]) if self.code else None,
+            weather_code=code,
         )
 
     def hourly_index(self, ts: float) -> int:
@@ -249,29 +263,41 @@ class OpenMeteoClient:
         hourly = (entry or {}).get("hourly") or {}
 
         def series(name: str) -> list:
-            return [v if v is not None else 0.0 for v in (hourly.get(name) or [])]
+            return list(hourly.get(name) or [])
 
         rain = series("rain")
         showers = series("showers")
         # Open-Meteo splits stratiform rain from convective showers; the risk
-        # table has a single "Rain in/hr" row, so they are summed.
-        combined_rain = [
-            float(r) + float(showers[i]) if i < len(showers) else float(r)
-            for i, r in enumerate(rain)
-        ]
+        # table has a single "Rain in/hr" row, so they are summed. A missing
+        # slot stays missing instead of collapsing to 0.0 (calm/dry).
+        combined_rain = []
+        count = max(len(rain), len(showers))
+        for i in range(count):
+            r = rain[i] if i < len(rain) else None
+            s = showers[i] if i < len(showers) else None
+            if r is None and s is None:
+                combined_rain.append(None)
+            else:
+                combined_rain.append(float(r or 0.0) + float(s or 0.0))
+
+        def floats(name: str) -> list:
+            return [None if v is None else float(v) for v in series(name)]
+
+        def ints(name: str) -> list:
+            return [None if v is None else int(v) for v in series(name)]
 
         return PointForecast(
             lon=coord[0],
             lat=coord[1],
             times=[int(t) for t in (hourly.get("time") or [])],
-            wind=[float(v) for v in series("wind_speed_10m")],
-            gust=[float(v) for v in series("wind_gusts_10m")],
+            wind=floats("wind_speed_10m"),
+            gust=floats("wind_gusts_10m"),
             rain=combined_rain,
-            snow=[float(v) for v in series("snowfall")],
-            temperature=[float(v) for v in series("temperature_2m")],
-            humidity=[float(v) for v in series("relative_humidity_2m")],
-            dewpoint=[float(v) for v in series("dew_point_2m")],
-            wind_dir=[float(v) for v in series("wind_direction_10m")],
-            visibility=[float(v) for v in series("visibility")],
-            code=[int(v) for v in series("weather_code")],
+            snow=floats("snowfall"),
+            temperature=floats("temperature_2m"),
+            humidity=floats("relative_humidity_2m"),
+            dewpoint=floats("dew_point_2m"),
+            wind_dir=floats("wind_direction_10m"),
+            visibility=floats("visibility"),
+            code=ints("weather_code"),
         )

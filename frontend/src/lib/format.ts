@@ -25,6 +25,17 @@ export function formatEta(iso: string | null): string {
   })
 }
 
+export function formatEtaRelative(iso: string | null): string | null {
+  if (!iso) return null
+  const minutes = Math.round((new Date(iso).getTime() - Date.now()) / 60_000)
+  if (!Number.isFinite(minutes)) return null
+  if (minutes <= 0) return 'now'
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours <= 0) return `in ${rest}m`
+  return `in ${hours}h ${rest}m`
+}
+
 export function formatDateTime(iso: string | null): string {
   if (!iso) return '-'
   return new Date(iso).toLocaleString(undefined, {
@@ -37,6 +48,20 @@ export function formatDateTime(iso: string | null): string {
 
 export function formatMiles(miles: number): string {
   return `${Math.round(miles).toLocaleString()} mi`
+}
+
+export function formatRiskScore(value: number | null | undefined, digits = 1): string {
+  return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits)
+}
+
+export function formatWeather(
+  value: number | null | undefined,
+  digits: number,
+  suffix: string,
+): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  const shown = digits === 0 ? String(Math.round(value)) : value.toFixed(digits)
+  return `${shown}${suffix}`
 }
 
 export function formatPounds(lb: number): string {

@@ -97,6 +97,7 @@ def build_heatmap(
     wind_grid: list[list[float]] = []
     rain_grid: list[list[float]] = []
     snow_grid: list[list[float]] = []
+    temp_grid: list[list[float | None]] = []
     kept_points: list[list[float]] = []
 
     for point in points:
@@ -108,6 +109,7 @@ def build_heatmap(
         wind_row: list[float] = []
         rain_row: list[float] = []
         snow_row: list[float] = []
+        temp_row: list[float | None] = []
         for ts in timestamps:
             sample = forecast.sample_at(ts.timestamp())
             risk_row.append(
@@ -120,15 +122,18 @@ def build_heatmap(
                     wind_metric,
                 )
             )
-            wind_row.append(round(sample.effective_wind(wind_metric), 1))
+            wind = sample.effective_wind(wind_metric)
+            wind_row.append(None if wind is None else round(wind, 1))
             rain_row.append(sample.rain_in_hr)
             snow_row.append(sample.snow_in_hr)
+            temp_row.append(sample.temperature_f)
 
         kept_points.append([round(point[0], 4), round(point[1], 4)])
         risk_grid.append(risk_row)
         wind_grid.append(wind_row)
         rain_grid.append(rain_row)
         snow_grid.append(snow_row)
+        temp_grid.append(temp_row)
 
     return {
         "anchor": anchor.isoformat(),
@@ -138,6 +143,7 @@ def build_heatmap(
         "wind": wind_grid,
         "rain": rain_grid,
         "snow": snow_grid,
+        "temperature": temp_grid,
         "max_score": int(RiskLevel.NO_TRAVEL),
         "load_lb": request.load_lb,
     }

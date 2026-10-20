@@ -86,14 +86,27 @@ class LoadRuleTests(SimpleTestCase):
     def test_55_mph_is_no_travel_for_any_load(self):
         for load in (0.0, LIGHT_LOAD, MAX_LOAD):
             with self.subTest(load=load):
+                result = self.assess_wind(55.0, load)
+                self.assertTrue(result.available)
+                self.assertEqual(result.level, RiskLevel.NO_TRAVEL)
                 self.assertEqual(self.assess_wind(60.0, load).level, RiskLevel.NO_TRAVEL)
 
+    def test_54_9_mph_is_severe_until_the_30000_lb_rule(self):
+        self.assertEqual(self.assess_wind(54.9, 30_000.0).level, RiskLevel.SEVERE)
+        self.assertEqual(self.assess_wind(54.9, 30_001.0).level, RiskLevel.NO_TRAVEL)
+
     def test_45_to_54_escalates_to_no_travel_above_30000_lb(self):
+        self.assertEqual(self.assess_wind(45.0, 30_000.0).level, RiskLevel.SEVERE)
+        self.assertEqual(self.assess_wind(45.0, 30_001.0).level, RiskLevel.NO_TRAVEL)
         self.assertEqual(self.assess_wind(50.0, 30_000.0).level, RiskLevel.SEVERE)
         self.assertEqual(self.assess_wind(50.0, 30_001.0).level, RiskLevel.NO_TRAVEL)
         self.assertEqual(self.assess_wind(50.0, HEAVY_LOAD).level, RiskLevel.NO_TRAVEL)
 
     def test_35_to_44_escalates_to_severe_above_40000_lb(self):
+        self.assertEqual(self.assess_wind(35.0, 40_000.0).level, RiskLevel.HIGH)
+        self.assertEqual(self.assess_wind(35.0, 40_001.0).level, RiskLevel.SEVERE)
+        self.assertEqual(self.assess_wind(44.9, 40_000.0).level, RiskLevel.HIGH)
+        self.assertEqual(self.assess_wind(44.9, 40_001.0).level, RiskLevel.SEVERE)
         self.assertEqual(self.assess_wind(40.0, 40_000.0).level, RiskLevel.HIGH)
         self.assertEqual(self.assess_wind(40.0, 40_001.0).level, RiskLevel.SEVERE)
         self.assertEqual(self.assess_wind(40.0, MAX_LOAD).level, RiskLevel.SEVERE)
@@ -139,3 +152,23 @@ class CombinedConditionTests(SimpleTestCase):
         self.assertEqual(int(RiskLevel.LOW), 0)
         self.assertEqual(int(RiskLevel.NO_TRAVEL), 4)
         self.assertLess(RiskLevel.HIGH, RiskLevel.SEVERE)
+
+
+class MissingWeatherTests(SimpleTestCase):
+    def test_empty_sample_is_not_scored_as_low(self):
+        result = assess(WeatherSample(), LIGHT_LOAD)
+        self.assertFalse(result.available)
+        self.assertEqual(result.score, -1)
+        self.assertTrue(any("unavailable" in reason.lower() for reason in result.reasons))
+
+    def test_zero_wind_is_low_because_it_is_an_observation(self):
+        result = assess(WeatherSample(wind_mph=0.0, rain_in_hr=0.0, snow_in_hr=0.0), LIGHT_LOAD)
+        self.assertTrue(result.available)
+        self.assertEqual(result.level, RiskLevel.LOW)
+
+    def test_partial_observation_does_not_invent_the_missing_fields(self):
+        result = assess(WeatherSample(rain_in_hr=0.8), LIGHT_LOAD)
+        self.assertTrue(result.available)
+        self.assertEqual(result.level, RiskLevel.SEVERE)
+        self.assertIsNone(result.wind)
+        self.assertEqual(result.rain, RiskLevel.SEVERE)

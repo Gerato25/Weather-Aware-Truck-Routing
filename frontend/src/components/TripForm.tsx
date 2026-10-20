@@ -95,8 +95,9 @@ export function TripForm({ values, loading, onChange, onSubmit }: TripFormProps)
         </div>
       </div>
 
-      <button type="submit" className="visually-hidden">
+      <button type="submit" className="primary find-route" disabled={!canSubmit}>
         {loading ? 'Planning…' : 'Find safest route'}
+        {!loading && <span aria-hidden="true"> →</span>}
       </button>
     </form>
   )

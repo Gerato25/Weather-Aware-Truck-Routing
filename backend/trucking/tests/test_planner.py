@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from django.test import SimpleTestCase
 
 from trucking.planner import (
+    EvaluatedRoute,
     TripRequest,
     collect_routes,
     plan_trip,
@@ -179,6 +180,108 @@ class RankingTests(SimpleTestCase):
             make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 12.0),  # slow but clear
         ]
         self.assertEqual(self.rank(routes, gale)[0], "route-2")
+
+    def test_fewer_severe_miles_beat_fewer_high_miles(self):
+        def conditions(lon, lat):
+            if lat >= 41.5:
+                return {"wind": 50.0, "gust": 50.0}  # Severe
+            if lat >= 40.5:
+                return {"wind": 40.0, "gust": 40.0}  # High
+            return {"wind": 5.0, "gust": 5.0}
+
+        routes = [
+            make_route((-100.0, 42.0), (-90.0, 42.0), 480.0, 8.0),   # Severe, faster
+            make_route((-100.0, 41.0), (-90.0, 41.0), 520.0, 11.0),  # High only, slower
+        ]
+        ranking = self.rank(routes, conditions)
+        self.assertEqual(ranking[0], "route-2")
+        self.assertEqual(ranking[1], "route-1")
+
+    def test_fewer_high_miles_beat_average_risk_and_duration(self):
+        def conditions(lon, lat):
+            if lat >= 41.5:
+                return {"wind": 40.0, "gust": 40.0}  # High
+            return {"wind": 30.0, "gust": 30.0}      # Moderate
+
+        routes = [
+            make_route((-100.0, 42.0), (-90.0, 42.0), 450.0, 8.0),   # High, faster
+            make_route((-100.0, 40.0), (-90.0, 40.0), 500.0, 12.0),  # Moderate, slower
+        ]
+        self.assertEqual(self.rank(routes, conditions)[0], "route-2")
+
+    def test_ranking_key_priority_is_severe_then_high_then_average_then_time(self):
+        def scored(route_id, severe, high, average, hours):
+            route = EvaluatedRoute(
+                id=route_id,
+                label=route_id,
+                raw=make_route((-100.0, 40.0), (-90.0, 40.0), 500.0, hours),
+                checkpoints=[],
+            )
+            route.miles_by_level = {level: 0.0 for level in RiskLevel}
+            route.miles_by_level[RiskLevel.SEVERE] = severe
+            route.miles_by_level[RiskLevel.HIGH] = high
+            route.average_risk = average
+            route.scored_miles = 500.0
+            return route
+
+        ordered = sorted(
+            [
+                scored("more-severe", 20.0, 0.0, 0.2, 8.0),
+                scored("more-high", 0.0, 80.0, 0.2, 8.0),
+                scored("higher-avg", 0.0, 0.0, 1.4, 8.0),
+                scored("slower-low-avg", 0.0, 0.0, 0.2, 14.0),
+                scored("fastest-low-avg", 0.0, 0.0, 0.2, 9.0),
+            ],
+            key=lambda route: route.ranking_key(),
+        )
+        self.assertEqual(
+            [route.id for route in ordered],
+            ["fastest-low-avg", "slower-low-avg", "higher-avg", "more-high", "more-severe"],
+        )
+
+    def test_ranking_rows_match_route_summaries(self):
+        payload = plan_trip(
+            trip(),
+            weather_client=FakeWeather(calm),
+            router=FakeRouter(
+                [
+                    make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 12.0),
+                    make_route((-100.0, 41.0), (-90.0, 41.0), 560.0, 10.0),
+                ]
+            ),
+        )
+        by_id = {route["id"]: route for route in payload["routes"]}
+        for row in payload["recommendation"]["ranking"]:
+            summary = by_id[row["route_id"]]["summary"]
+            self.assertEqual(row["severe_miles"], summary["miles_by_level"]["SEVERE"])
+            self.assertEqual(row["high_miles"], summary["miles_by_level"]["HIGH"])
+            self.assertEqual(row["average_risk"], summary["average_risk"])
+            self.assertEqual(row["duration_hours"], summary["duration_hours"])
+            self.assertEqual(row["no_travel_miles"], summary["miles_by_level"]["NO_TRAVEL"])
+
+    def test_missing_forecast_is_not_ranked_as_zero_risk(self):
+        def conditions(lon, lat):
+            return {"wind": 40.0, "gust": 40.0}
+
+        class PartialWeather(FakeWeather):
+            def forecasts(self, coords, forecast_days=3):
+                kept = [coord for coord in coords if coord[1] < 40.5]
+                return super().forecasts(kept, forecast_days)
+
+        payload = plan_trip(
+            trip(),
+            weather_client=PartialWeather(conditions),
+            router=FakeRouter(
+                [
+                    make_route((-100.0, 41.0), (-90.0, 41.0), 400.0, 7.0),  # no weather
+                    make_route((-100.0, 40.0), (-90.0, 40.0), 520.0, 11.0),  # High, scored
+                ]
+            ),
+        )
+        northern = next(route for route in payload["routes"] if route["id"] == "route-1")
+        self.assertFalse(northern["checkpoints"][0]["risk"]["available"])
+        self.assertEqual(northern["checkpoints"][0]["risk"]["level"], "UNKNOWN")
+        self.assertEqual(payload["recommendation"]["route_id"], "route-2")
 
 
 class RouteCollectionTests(SimpleTestCase):

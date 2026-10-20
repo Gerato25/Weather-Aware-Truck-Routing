@@ -1,21 +1,23 @@
-import type { RiskLevelSlug } from '../types'
+import type { RiskDisplaySlug, RiskLevelSlug } from '../types'
 
 export const RISK_LEVELS: RiskLevelSlug[] = ['LOW', 'MODERATE', 'HIGH', 'SEVERE', 'NO_TRAVEL']
 
-export const RISK_COLORS: Record<RiskLevelSlug, string> = {
+export const RISK_COLORS: Record<RiskLevelSlug | 'UNKNOWN', string> = {
   LOW: '#22c55e',
   MODERATE: '#facc15',
   HIGH: '#fb923c',
   SEVERE: '#ef4444',
-  NO_TRAVEL: '#c026d3',
+  NO_TRAVEL: '#334155',
+  UNKNOWN: '#94a3b8',
 }
 
-export const RISK_LABELS: Record<RiskLevelSlug, string> = {
+export const RISK_LABELS: Record<RiskLevelSlug | 'UNKNOWN', string> = {
   LOW: 'Low',
   MODERATE: 'Moderate',
   HIGH: 'High',
   SEVERE: 'Severe',
   NO_TRAVEL: 'No Travel',
+  UNKNOWN: 'Unknown',
 }
 
 /** Printed table bands, including the shared rain/snow endpoints. */
@@ -27,8 +29,8 @@ export const RISK_THRESHOLDS: Record<RiskLevelSlug, { wind: string; rain: string
   NO_TRAVEL: { wind: '≥ 55', rain: '> 1.00', snow: '> 3.0' },
 }
 
-export function riskColor(level: RiskLevelSlug): string {
-  return RISK_COLORS[level] ?? RISK_COLORS.LOW
+export function riskColor(level: RiskDisplaySlug): string {
+  return RISK_COLORS[level] ?? RISK_COLORS.UNKNOWN
 }
 
 function scoreIndex(score: number): number {
@@ -36,16 +38,18 @@ function scoreIndex(score: number): number {
 }
 
 /** Colour for a continuous average-risk score (0 = Low ... 4 = No Travel). */
-export function scoreColor(score: number): string {
+export function scoreColor(score: number | null | undefined): string {
+  if (score == null || !Number.isFinite(score) || score < 0) return RISK_COLORS.UNKNOWN
   return RISK_COLORS[RISK_LEVELS[scoreIndex(score)]]
 }
 
-export function scoreLabel(score: number): string {
+export function scoreLabel(score: number | null | undefined): string {
+  if (score == null || !Number.isFinite(score) || score < 0) return RISK_LABELS.UNKNOWN
   return RISK_LABELS[RISK_LEVELS[scoreIndex(score)]]
 }
 
 /** Route line colours, kept distinct from the risk palette to avoid confusion. */
-export const ROUTE_COLORS = ['#22c55e', '#3b82f6', '#a855f7']
+export const ROUTE_COLORS = ['#2563eb', '#16a34a', '#7c3aed']
 
 export function routeColor(index: number): string {
   return ROUTE_COLORS[index % ROUTE_COLORS.length]
@@ -61,7 +65,7 @@ export type HeatLayers = Record<HeatMetric, boolean>
 export const DEFAULT_HEAT_LAYERS: HeatLayers = {
   risk: true,
   wind: false,
-  rain: false,
+  rain: true,
   snow: false,
 }
 

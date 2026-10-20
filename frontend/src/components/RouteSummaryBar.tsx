@@ -10,7 +10,9 @@ interface RouteSummaryBarProps {
 export function RouteSummaryBar({ plan, onSelect }: RouteSummaryBarProps) {
   const bestIndex = plan.routes.findIndex((route) => route.id === plan.recommendation.route_id)
   const fastest = [...plan.routes].sort((a, b) => a.summary.duration_hours - b.summary.duration_hours)[0]
-  const safest = [...plan.routes].sort((a, b) => a.summary.average_risk - b.summary.average_risk)[0]
+  const safest = [...plan.routes].sort(
+    (a, b) => (a.summary.average_risk ?? 99) - (b.summary.average_risk ?? 99),
+  )[0]
   if (!fastest || !safest) return null
 
   return (

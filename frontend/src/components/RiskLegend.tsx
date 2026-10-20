@@ -17,13 +17,10 @@ interface RiskLegendProps {
 }
 
 const OVERLAY_SCALES: Record<HeatMetric, { color: string; label: string }[]> = {
-  risk: [
-    { color: '#22c55e', label: 'Cool' },
-    { color: '#86efac', label: 'Mild' },
-    { color: '#facc15', label: 'Warm' },
-    { color: '#fb923c', label: 'Hot' },
-    { color: '#ef4444', label: 'Extreme' },
-  ],
+  risk: RISK_LEVELS.map((level) => ({
+    color: RISK_COLORS[level],
+    label: RISK_LABELS[level],
+  })),
   wind: [
     { color: '#bae6fd', label: 'Calm' },
     { color: '#38bdf8', label: 'Breezy' },
@@ -42,7 +39,7 @@ const OVERLAY_SCALES: Record<HeatMetric, { color: string; label: string }[]> = {
 }
 
 const OVERLAY_TITLES: Record<HeatMetric, string> = {
-  risk: 'Temperature',
+  risk: 'Corridor risk',
   wind: 'Wind',
   rain: 'Rain',
   snow: 'Snow',

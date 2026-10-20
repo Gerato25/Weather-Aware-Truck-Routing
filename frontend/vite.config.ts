@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
@@ -36,7 +37,7 @@ function maplibreWorker(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), maplibreWorker()],
+  plugins: [react(), tailwindcss(), maplibreWorker()],
   server: {
     port: 5173,
     // Bind IPv4 explicitly; the default IPv6-only bind is unreachable for

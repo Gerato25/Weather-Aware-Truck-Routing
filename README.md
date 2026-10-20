@@ -10,7 +10,7 @@ The UI shows every route on a map, risk-colored checkpoints with ETAs, a ranked 
 2. The API fetches **up to three distinct routes** (OpenRouteService truck profile when a key is set, otherwise public OSRM, with forced detours if the router only returns one or two).
 3. Checkpoints are sampled along each geometry. The truck's **ETA at each checkpoint** comes from the provider's per-segment travel times, not a flat average speed.
 4. Open-Meteo hourly wind / rain / snow is interpolated to that ETA and classified with the risk table and load rules below.
-5. Routes are ranked, then drawn on the map with a corridor heatmap for the selected route.
+5. Routes are ranked, then drawn on the map with a **corridor** weather heatmap for the selected route. The 0–48h slider only swaps already-fetched hour properties.
 
 ## Risk rules
 
@@ -49,8 +49,8 @@ React (Vite + MapLibre GL)  →  Django REST  →  OSRM / OpenRouteService
 | **OSRM** (zero-key fallback) | Alternative routes + per-edge duration annotations for accurate ETAs |
 | **OpenRouteService** (optional key) | Real `driving-hgv` truck profile with the entered load as a weight restriction |
 | **Open-Meteo** | No key; batch multi-point hourly forecasts already in mph / inches |
-| **MapLibre + CARTO Dark Matter** | Vector map, no map-token required |
-| **Heatmap slider** | Each corridor point carries `h0…h48` properties; the slider only swaps a paint expression |
+| **MapLibre + OpenFreeMap** | Vector map, no map-token required |
+| **Heatmap slider** | Corridor points carry `h0…h48` risk; the slider only swaps a paint expression (no refetch) |
 
 The Django process is **stateless** (no database). Forecasts are cached in memory for 15 minutes so repeated plans along the same corridor do not hammer Open-Meteo.
 
@@ -84,7 +84,7 @@ cd backend
 python manage.py test trucking
 ```
 
-81 tests cover band edges, load-rule escalation, ETA interpolation, mileage rollups, ranking ties, corridor expansion, and API validation. They do not hit the network.
+103 tests cover band edges, load-rule escalation, missing-weather handling, ETA interpolation, mileage rollups, ranking (Severe then High then average risk then time), corridor expansion, and API validation. They do not hit the network.
 
 Live smoke test (hits OSRM + Open-Meteo):
 

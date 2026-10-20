@@ -13,7 +13,21 @@ import {
 } from 'maplibre-gl'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  HEAT_LAYER_IDS,
+  HEAT_SOURCE_IDS,
+  corridorHeatGeoJSON,
+  heatColorExpression,
+} from '../lib/corridorHeat'
+import { corridorRiskAt } from '../lib/corridorHour'
 import { formatClock } from '../lib/format'
+import {
+  OM_LAYER_IDS,
+  OM_SOURCE_IDS,
+  fetchOmValidTimes,
+  omTileUrl,
+  timeStepForHour,
+} from '../lib/omWeather'
 import {
   DEFAULT_HEAT_LAYERS,
   HEAT_LAYER_KEYS,
@@ -22,13 +36,6 @@ import {
   routeColor,
   type HeatLayers,
 } from '../lib/risk'
-import {
-  OM_LAYER_IDS,
-  OM_SOURCE_IDS,
-  fetchOmValidTimes,
-  omTileUrl,
-  timeStepForHour,
-} from '../lib/omWeather'
 import { MAP_STYLES, type Theme } from '../lib/theme'
 import type { Checkpoint, CorridorResponse, Place, Route } from '../types'
 
@@ -54,7 +61,7 @@ const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', feature
 const POPUP_OPTIONS = {
   closeButton: true,
   className: 'checkpoint-popup',
-  maxWidth: '290px',
+  maxWidth: '320px',
   offset: 12,
 } as const
 
@@ -74,11 +81,17 @@ interface MapViewProps {
   heatHour: number
   heatLayers: HeatLayers
   focused: CheckpointRef | null
+  hiddenRouteIds?: string[]
   basemap?: 'map' | 'satellite'
   hideEmpty?: boolean
   worldView?: boolean
+  className?: string
+  weatherRaster?: boolean
+  rasterOpacity?: number
+  showJump?: boolean
   onSelectRoute: (routeId: string) => void
   onFocusCheckpoint: (ref: CheckpointRef | null) => void
+  onWeatherCatalog?: (available: boolean) => void
 }
 
 /** Risk level -> colour, as a MapLibre `match` expression. */
@@ -95,44 +108,127 @@ const riskColorExpression: ExpressionSpecification = [
   RISK_COLORS.SEVERE,
   'NO_TRAVEL',
   RISK_COLORS.NO_TRAVEL,
-  RISK_COLORS.LOW,
+  'UNKNOWN',
+  RISK_COLORS.UNKNOWN,
+  RISK_COLORS.UNKNOWN,
 ]
 
-function routesToGeoJSON(routes: Route[], selectedRouteId: string | null): FeatureCollection {
-  const features: Feature[] = routes.map((route, index) => ({
-    type: 'Feature',
-    geometry: route.geometry,
-    properties: {
-      routeId: route.id,
-      label: route.label,
-      color: routeColor(index),
-      selected: route.id === selectedRouteId,
-    },
-  }))
-  // Features paint in array order, so the selected route is drawn last and
-  // therefore sits on top of the others.
+function nearestCoordIndex(coords: [number, number][], lon: number, lat: number): number {
+  let best = 0
+  let bestDist = Number.POSITIVE_INFINITY
+  for (let i = 0; i < coords.length; i += 1) {
+    const dx = coords[i][0] - lon
+    const dy = coords[i][1] - lat
+    const dist = dx * dx + dy * dy
+    if (dist < bestDist) {
+      bestDist = dist
+      best = i
+    }
+  }
+  return best
+}
+
+function segmentCoordinates(
+  coords: [number, number][],
+  from: Checkpoint,
+  to: Checkpoint,
+): [number, number][] {
+  if (coords.length < 2) return [[from.lon, from.lat], [to.lon, to.lat]]
+  let start = nearestCoordIndex(coords, from.lon, from.lat)
+  let end = nearestCoordIndex(coords, to.lon, to.lat)
+  if (end < start) [start, end] = [end, start]
+  const slice = coords.slice(start, end + 1)
+  return slice.length >= 2 ? slice : [[from.lon, from.lat], [to.lon, to.lat]]
+}
+
+function routesToGeoJSON(
+  routes: Route[],
+  selectedRouteId: string | null,
+  hiddenIds: Set<string>,
+): FeatureCollection {
+  const features: Feature[] = []
+  routes.forEach((route, index) => {
+    if (hiddenIds.has(route.id)) return
+    const selected = route.id === selectedRouteId
+    const identity = routeColor(index)
+    const checkpoints = route.checkpoints
+    if (checkpoints.length < 2) {
+      features.push({
+        type: 'Feature',
+        geometry: route.geometry,
+        properties: {
+          routeId: route.id,
+          label: route.label,
+          color: identity,
+          identity,
+          selected,
+        },
+      })
+      return
+    }
+    for (let i = 0; i < checkpoints.length - 1; i += 1) {
+      const from = checkpoints[i]
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: segmentCoordinates(route.geometry.coordinates, from, checkpoints[i + 1]),
+        },
+        properties: {
+          routeId: route.id,
+          label: route.label,
+          color: identity,
+          identity,
+          selected,
+        },
+      })
+    }
+  })
   features.sort(
     (a, b) => Number(a.properties?.selected ?? false) - Number(b.properties?.selected ?? false),
   )
   return { type: 'FeatureCollection', features }
 }
 
-function checkpointsToGeoJSON(route: Route | null): FeatureCollection {
-  if (!route) return EMPTY_COLLECTION
-  return {
-    type: 'FeatureCollection',
-    features: route.checkpoints.map((cp) => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [cp.lon, cp.lat] },
-      properties: {
-        routeId: route.id,
-        index: cp.index,
-        level: cp.risk.level,
-        score: cp.risk.score,
-        popup: checkpointPopupHtml(cp),
-      },
-    })),
+function checkpointName(route: Route, cp: Checkpoint, origin: Place | null, destination: Place | null) {
+  if (cp.index === 0) return `${origin?.label.split(',')[0]?.trim() || 'Start'} (Start)`
+  if (cp.index === route.checkpoints.length - 1) {
+    return `${destination?.label.split(',')[0]?.trim() || 'End'} (End)`
   }
+  return `Mile ${Math.round(cp.mile)}`
+}
+
+function checkpointsToGeoJSON(
+  routes: Route[],
+  selectedRouteId: string | null,
+  hiddenIds: Set<string>,
+  origin: Place | null,
+  destination: Place | null,
+  corridor: CorridorResponse | null,
+  heatHour: number,
+): FeatureCollection {
+  const features: Feature[] = []
+  for (const route of routes) {
+    if (hiddenIds.has(route.id)) continue
+    const selected = route.id === selectedRouteId
+    for (const cp of route.checkpoints) {
+      const name = checkpointName(route, cp, origin, destination)
+      const forecastLevel = corridorRiskAt(corridor, cp.lon, cp.lat, heatHour)
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [cp.lon, cp.lat] },
+        properties: {
+          routeId: route.id,
+          index: cp.index,
+          level: forecastLevel ?? cp.risk.level,
+          score: cp.risk.score,
+          selected,
+          popup: checkpointPopupHtml(cp, name),
+        },
+      })
+    }
+  }
+  return { type: 'FeatureCollection', features }
 }
 
 function endpointsToGeoJSON(origin: Place | null, destination: Place | null): FeatureCollection {
@@ -154,26 +250,34 @@ function endpointsToGeoJSON(origin: Place | null, destination: Place | null): Fe
   return { type: 'FeatureCollection', features }
 }
 
-function checkpointPopupHtml(cp: Checkpoint): string {
+function popupNumber(value: number | null | undefined, digits: number, suffix: string): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  return `${value.toFixed(digits)}${suffix}`
+}
+
+function checkpointPopupHtml(cp: Checkpoint, name?: string): string {
   const { weather, risk } = cp
+  const title = name || `Mile ${Math.round(cp.mile)}`
   const reasons = risk.reasons.length
     ? `<ul class="popup-reasons">${risk.reasons
         .map((reason) => `<li>${escapeHtml(reason)}</li>`)
         .join('')}</ul>`
-    : '<p class="popup-reasons">All conditions within Low thresholds.</p>'
+    : risk.available !== false
+      ? '<p class="popup-reasons">All conditions within Low thresholds.</p>'
+      : '<p class="popup-reasons">Weather data was unavailable; this checkpoint was not scored as Low.</p>'
 
   return `
     <div class="popup">
       <div class="popup-head" style="--level-color:${riskColor(risk.level)}">
         <span class="popup-badge">${escapeHtml(risk.label)}</span>
-        <span class="popup-mile">Mile ${cp.mile.toFixed(0)}</span>
+        <span class="popup-mile">${escapeHtml(title)}</span>
       </div>
       <div class="popup-eta">ETA ${escapeHtml(formatClock(cp.eta))}</div>
       <dl class="popup-grid">
-        <div><dt>Wind</dt><dd>${weather.wind_mph.toFixed(0)} mph</dd></div>
-        <div><dt>Gusts</dt><dd>${weather.wind_gust_mph.toFixed(0)} mph</dd></div>
-        <div><dt>Rain</dt><dd>${weather.rain_in_hr.toFixed(2)} in/hr</dd></div>
-        <div><dt>Snow</dt><dd>${weather.snow_in_hr.toFixed(2)} in/hr</dd></div>
+        <div><dt>Wind</dt><dd>${popupNumber(weather.wind_mph, 0, ' mph')}</dd></div>
+        <div><dt>Gusts</dt><dd>${popupNumber(weather.wind_gust_mph, 0, ' mph')}</dd></div>
+        <div><dt>Rain</dt><dd>${popupNumber(weather.rain_in_hr, 2, ' in/hr')}</dd></div>
+        <div><dt>Snow</dt><dd>${popupNumber(weather.snow_in_hr, 2, ' in/hr')}</dd></div>
         ${
           weather.temperature_f === null
             ? ''
@@ -208,12 +312,7 @@ function tuneDarkBasemap(map: MapLibreMap) {
   }
 }
 
-function firstSymbolLayerId(map: MapLibreMap): string | undefined {
-  return map.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id
-}
-
-function installWeatherRasters(map: MapLibreMap, timeStep: string, layers: HeatLayers) {
-  const before = firstSymbolLayerId(map)
+function installWeatherRasters(map: MapLibreMap, timeStep: string) {
   for (const metric of HEAT_LAYER_KEYS) {
     const sourceId = OM_SOURCE_IDS[metric]
     const layerId = OM_LAYER_IDS[metric]
@@ -221,36 +320,59 @@ function installWeatherRasters(map: MapLibreMap, timeStep: string, layers: HeatL
       map.addSource(sourceId, { type: 'raster', url: omTileUrl(metric, timeStep) })
     }
     if (!map.getLayer(layerId)) {
-      map.addLayer(
-        {
-          id: layerId,
-          type: 'raster',
-          source: sourceId,
-          layout: { visibility: layers[metric] ? 'visible' : 'none' },
-          paint: { 'raster-opacity': 0.58, 'raster-fade-duration': 0 },
-        },
-        before,
-      )
-    }
-  }
-}
-
-function setWeatherTimeStep(map: MapLibreMap, timeStep: string) {
-  for (const metric of HEAT_LAYER_KEYS) {
-    const source = map.getSource(OM_SOURCE_IDS[metric])
-    if (source && 'setUrl' in source && typeof source.setUrl === 'function') {
-      source.setUrl(omTileUrl(metric, timeStep))
+      map.addLayer({
+        id: layerId,
+        type: 'raster',
+        source: sourceId,
+        layout: { visibility: 'none' },
+        paint: { 'raster-opacity': 0.38, 'raster-fade-duration': 0 },
+      })
     }
   }
 }
 
 /** Creates every source and layer once, in bottom-to-top draw order. */
 function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
+  installWeatherRasters(map, 'current_time_1H')
   for (const name of Object.values(SOURCES)) {
     map.addSource(name, { type: 'geojson', data: EMPTY_COLLECTION })
   }
-
-  installWeatherRasters(map, 'current_time_1H', layers)
+  for (const metric of HEAT_LAYER_KEYS) {
+    map.addSource(HEAT_SOURCE_IDS[metric], { type: 'geojson', data: EMPTY_COLLECTION })
+    map.addLayer({
+      id: HEAT_LAYER_IDS[metric],
+      type: 'circle',
+      source: HEAT_SOURCE_IDS[metric],
+      layout: { visibility: layers[metric] ? 'visible' : 'none' },
+      paint: {
+        'circle-color': heatColorExpression(0, metric),
+        'circle-radius': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          3,
+          11,
+          8,
+          18,
+          12,
+          12,
+        ] as ExpressionSpecification,
+        'circle-blur': 0.72,
+        'circle-opacity': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          3,
+          0.45,
+          7,
+          0.55,
+          12,
+          0.38,
+        ] as ExpressionSpecification,
+        'circle-pitch-alignment': 'map',
+      },
+    })
+  }
 
   map.addLayer({
     id: LAYERS.routeCasing,
@@ -258,9 +380,17 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     source: SOURCES.routes,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#020617',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 4, 5, 10, 11],
-      'line-opacity': ['case', ['get', 'selected'], 0.9, 0.55],
+      'line-color': '#ffffff',
+      'line-width': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        4,
+        ['case', ['get', 'selected'], 10, 7],
+        10,
+        ['case', ['get', 'selected'], 15, 11],
+      ],
+      'line-opacity': 0.95,
     },
   })
 
@@ -276,11 +406,11 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
         ['linear'],
         ['zoom'],
         4,
-        ['case', ['get', 'selected'], 3.4, 2],
+        ['case', ['get', 'selected'], 5.5, 3.8],
         10,
-        ['case', ['get', 'selected'], 7, 3.4],
+        ['case', ['get', 'selected'], 9, 6],
       ],
-      'line-opacity': ['case', ['get', 'selected'], 1, 0.82],
+      'line-opacity': 1,
     },
   })
 
@@ -290,8 +420,12 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     source: SOURCES.checkpoints,
     paint: {
       'circle-color': riskColorExpression,
-      // Only elevated checkpoints get a halo, so a calm route stays clean.
-      'circle-opacity': ['case', ['>', ['get', 'score'], 1], 0.22, 0],
+      'circle-opacity': [
+        'case',
+        ['all', ['get', 'selected'], ['>', ['get', 'score'], 1]],
+        0.22,
+        0,
+      ],
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 9, 10, 22],
     },
   })
@@ -302,9 +436,18 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     source: SOURCES.checkpoints,
     paint: {
       'circle-color': riskColorExpression,
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 3.4, 7, 5.5, 11, 8],
-      'circle-stroke-width': ['case', ['>', ['get', 'score'], 2], 2, 1],
-      'circle-stroke-color': '#0b1120',
+      'circle-radius': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        4,
+        ['case', ['get', 'selected'], 5.5, 3.4],
+        11,
+        ['case', ['get', 'selected'], 9, 5.5],
+      ],
+      'circle-opacity': ['case', ['get', 'selected'], 1, 0.72],
+      'circle-stroke-width': ['case', ['get', 'selected'], 2, 1],
+      'circle-stroke-color': '#ffffff',
     },
   })
 
@@ -314,9 +457,9 @@ function installLayers(map: MapLibreMap, theme: Theme, layers: HeatLayers) {
     source: SOURCES.endpoints,
     paint: {
       'circle-color': ['get', 'color'],
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 10, 9],
-      'circle-stroke-width': 2.5,
-        'circle-stroke-color': '#ffffff',
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 6.5, 10, 10],
+      'circle-stroke-width': 3,
+      'circle-stroke-color': '#ffffff',
     },
   })
 
@@ -345,17 +488,17 @@ interface InteractionHandlers {
 }
 
 function installInteractions(map: MapLibreMap, handlers: InteractionHandlers) {
-  map.on('click', LAYERS.checkpointDot, (event: MapLayerMouseEvent) => {
+  const openCheckpoint = (event: MapLayerMouseEvent) => {
     const feature = event.features?.[0]
     if (!feature) return
-
     const { routeId, index, popup } = feature.properties as Record<string, string>
     const coordinates = (feature.geometry as Point).coordinates as [number, number]
     handlers.onCheckpointClick({ routeId, index: Number(index) }, coordinates, popup)
-  })
+  }
+
+  map.on('click', LAYERS.checkpointDot, openCheckpoint)
 
   map.on('click', LAYERS.routeLine, (event: MapLayerMouseEvent) => {
-    // A checkpoint click wins over the route line underneath it.
     const onCheckpoint = map.queryRenderedFeatures(event.point, {
       layers: [LAYERS.checkpointDot],
     })
@@ -401,14 +544,21 @@ export function MapView({
   recommendedRouteId,
   origin,
   destination,
+  corridor = null,
   heatHour,
   heatLayers,
   focused,
+  hiddenRouteIds = [],
   basemap = 'map',
   hideEmpty = false,
   worldView = false,
+  className,
+  weatherRaster = true,
+  rasterOpacity = 0.38,
+  showJump = true,
   onSelectRoute,
   onFocusCheckpoint,
+  onWeatherCatalog,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
@@ -419,22 +569,42 @@ export function MapView({
   // Keep the latest callbacks reachable from listeners bound once on load.
   const selectRouteRef = useRef(onSelectRoute)
   const focusRef = useRef(onFocusCheckpoint)
+  const weatherCatalogRef = useRef(onWeatherCatalog)
   useEffect(() => {
     selectRouteRef.current = onSelectRoute
     focusRef.current = onFocusCheckpoint
-  }, [onSelectRoute, onFocusCheckpoint])
+    weatherCatalogRef.current = onWeatherCatalog
+  }, [onSelectRoute, onFocusCheckpoint, onWeatherCatalog])
 
-  const selectedRoute = useMemo(
-    () => routes.find((route) => route.id === selectedRouteId) ?? null,
-    [routes, selectedRouteId],
-  )
+  const hiddenIds = useMemo(() => new Set(hiddenRouteIds), [hiddenRouteIds])
 
   const routeData = useMemo(
-    () => routesToGeoJSON(routes, selectedRouteId),
-    [routes, selectedRouteId],
+    () => routesToGeoJSON(routes, selectedRouteId, hiddenIds),
+    [routes, selectedRouteId, hiddenIds],
   )
-  const checkpointData = useMemo(() => checkpointsToGeoJSON(selectedRoute), [selectedRoute])
+  const checkpointData = useMemo(
+    () =>
+      checkpointsToGeoJSON(
+        routes,
+        selectedRouteId,
+        hiddenIds,
+        origin,
+        destination,
+        corridor ?? null,
+        heatHour,
+      ),
+    [routes, selectedRouteId, hiddenIds, origin, destination, corridor, heatHour],
+  )
   const endpointData = useMemo(() => endpointsToGeoJSON(origin, destination), [origin, destination])
+  const heatData = useMemo(
+    () => ({
+      risk: corridorHeatGeoJSON(corridor, 'risk'),
+      wind: corridorHeatGeoJSON(corridor, 'wind'),
+      rain: corridorHeatGeoJSON(corridor, 'rain'),
+      snow: corridorHeatGeoJSON(corridor, 'snow'),
+    }),
+    [corridor],
+  )
   const [omTimes, setOmTimes] = useState<string[]>([])
 
   function showPopup(map: MapLibreMap, coordinates: [number, number], html: string) {
@@ -485,10 +655,14 @@ export function MapView({
       installLayers(map, theme, DEFAULT_HEAT_LAYERS)
       installInteractions(map, {
         onCheckpointClick: (ref, coordinates, html) => {
+          selectRouteRef.current(ref.routeId)
           showPopup(map, coordinates, html).on('close', () => focusRef.current(null))
           focusRef.current(ref)
         },
-        onRouteClick: (routeId) => selectRouteRef.current(routeId),
+        onRouteClick: (routeId) => {
+          selectRouteRef.current(routeId)
+          focusRef.current(null)
+        },
       })
       setMapError(null)
       setReady(true)
@@ -496,7 +670,7 @@ export function MapView({
 
     map.on('error', (event) => {
       const message = event.error?.message ?? 'The map failed to load'
-      if (/worker|fetch|style|tile|failed/i.test(message)) {
+      if (/worker/i.test(message) && !/om:/i.test(message)) {
         setMapError(message)
       }
     })
@@ -527,11 +701,24 @@ export function MapView({
   }, [ready, endpointData])
 
   useEffect(() => {
+    if (!ready) return
+    for (const metric of HEAT_LAYER_KEYS) {
+      setSourceData(HEAT_SOURCE_IDS[metric], heatData[metric])
+    }
+  }, [ready, heatData])
+
+  useEffect(() => {
     const controller = new AbortController()
     fetchOmValidTimes(controller.signal)
-      .then(setOmTimes)
+      .then((times) => {
+        setOmTimes(times)
+        weatherCatalogRef.current?.(times.length > 0)
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setOmTimes([])
+        if (!controller.signal.aborted) {
+          setOmTimes([])
+          weatherCatalogRef.current?.(false)
+        }
       })
     return () => controller.abort()
   }, [])
@@ -539,21 +726,47 @@ export function MapView({
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
-    setWeatherTimeStep(map, timeStepForHour(omTimes, heatHour))
-  }, [ready, heatHour, omTimes])
+    const step = timeStepForHour(omTimes, heatHour, corridor?.hours[heatHour])
+    for (const metric of HEAT_LAYER_KEYS) {
+      const source = map.getSource(OM_SOURCE_IDS[metric])
+      if (source && 'setUrl' in source && typeof source.setUrl === 'function') {
+        source.setUrl(omTileUrl(metric, step))
+      }
+    }
+  }, [ready, heatHour, omTimes, corridor])
 
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
-    const active = HEAT_LAYER_KEYS.filter((metric) => heatLayers[metric]).length
-    const opacity = active > 1 ? 0.42 : 0.58
     for (const metric of HEAT_LAYER_KEYS) {
-      const layerId = OM_LAYER_IDS[metric]
+      const layerId = HEAT_LAYER_IDS[metric]
       if (!map.getLayer(layerId)) continue
-      map.setLayoutProperty(layerId, 'visibility', heatLayers[metric] ? 'visible' : 'none')
-      map.setPaintProperty(layerId, 'raster-opacity', opacity)
+      map.setPaintProperty(layerId, 'circle-color', heatColorExpression(heatHour, metric))
     }
-  }, [ready, heatLayers])
+  }, [ready, heatHour])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    const rasterOk = weatherRaster && omTimes.length > 0
+    const hasCorridor = Boolean(corridor?.points.length)
+    const stacked = HEAT_LAYER_KEYS.filter((metric) => heatLayers[metric]).length > 1
+    const circleOpacity = stacked ? 0.34 : hasCorridor && rasterOk ? 0.42 : 0.55
+    for (const metric of HEAT_LAYER_KEYS) {
+      const circleId = HEAT_LAYER_IDS[metric]
+      const rasterId = OM_LAYER_IDS[metric]
+      if (map.getLayer(circleId)) {
+        const showCircle = heatLayers[metric] && hasCorridor
+        map.setLayoutProperty(circleId, 'visibility', showCircle ? 'visible' : 'none')
+        map.setPaintProperty(circleId, 'circle-opacity', circleOpacity)
+      }
+      if (map.getLayer(rasterId)) {
+        const showRaster = rasterOk && heatLayers[metric] && metric !== 'risk'
+        map.setLayoutProperty(rasterId, 'visibility', showRaster ? 'visible' : 'none')
+        map.setPaintProperty(rasterId, 'raster-opacity', rasterOpacity)
+      }
+    }
+  }, [ready, heatLayers, weatherRaster, omTimes, rasterOpacity, corridor])
 
   useEffect(() => {
     const map = mapRef.current
@@ -587,43 +800,49 @@ export function MapView({
 
   // --- camera -------------------------------------------------------------
   const fitKey = useMemo(
-    () => routes.map((route) => route.id).join('|') + (origin?.label ?? ''),
-    [routes, origin],
+    () => `${routes.map((route) => route.id).join('|')}|${origin?.label ?? ''}|${destination?.label ?? ''}`,
+    [routes, origin, destination],
   )
   const lastFitKey = useRef<string | null>(null)
 
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || !routes.length) return
-    // Refit only when the set of routes changes, so selecting a different
-    // route or scrubbing the slider never yanks the camera away from the user.
+    // Refit when the planned route set changes, not when a route is highlighted
+    // or the forecast slider moves, so all alternatives stay in view.
     if (lastFitKey.current === fitKey) return
     lastFitKey.current = fitKey
 
     const bounds = boundsOf(routes, [origin, destination])
     if (bounds) {
       map.fitBounds(bounds, {
-        padding: { top: 64, bottom: 72, left: 48, right: 48 },
+        padding: { top: 56, bottom: 110, left: 48, right: 48 },
         duration: 900,
+        maxZoom: 8.5,
       })
     }
   }, [ready, fitKey, routes, origin, destination])
 
-  // Flying to a checkpoint picked from the inspector list.
+  // Flying to a checkpoint picked from the inspector list or another route.
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map || !focused || !selectedRoute) return
-    if (focused.routeId !== selectedRoute.id) return
+    if (!ready || !map || !focused) return
+    const route = routes.find((item) => item.id === focused.routeId)
+    if (!route) return
 
-    const cp = selectedRoute.checkpoints.find((item) => item.index === focused.index)
+    const cp = route.checkpoints.find((item) => item.index === focused.index)
     if (!cp) return
 
     map.flyTo({ center: [cp.lon, cp.lat], zoom: Math.max(map.getZoom(), 6.5), duration: 700 })
-    showPopup(map, [cp.lon, cp.lat], checkpointPopupHtml(cp))
-  }, [ready, focused, selectedRoute])
+    showPopup(
+      map,
+      [cp.lon, cp.lat],
+      checkpointPopupHtml(cp, checkpointName(route, cp, origin, destination)),
+    )
+  }, [ready, focused, routes, origin, destination])
 
   return (
-    <div className="map-shell">
+    <div className={['map-shell', className].filter(Boolean).join(' ')}>
       <div ref={containerRef} className="map-canvas" data-basemap={theme} />
       {mapError && (
         <div className="map-empty" role="alert">
@@ -636,7 +855,7 @@ export function MapView({
           <p>Set origin, destination, departure and load to draw routes and the weather heatmap.</p>
         </div>
       )}
-      {recommendedRouteId && selectedRouteId !== recommendedRouteId && (
+      {showJump && recommendedRouteId && selectedRouteId !== recommendedRouteId && (
         <button
           type="button"
           className="map-jump"

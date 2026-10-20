@@ -115,7 +115,6 @@ export function useTripSession() {
 
   const selectRoute = useCallback((routeId: string) => {
     setSelectedRouteId(routeId)
-    setFocused(null)
   }, [])
 
   return {

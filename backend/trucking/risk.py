@@ -95,17 +95,27 @@ def classify_snow(snow_in_hr: float) -> RiskLevel:
 
 @dataclass(frozen=True)
 class WeatherSample:
-    """Forecast values at one checkpoint, already in the risk table's units."""
+    """Forecast values at one checkpoint, already in the risk table's units.
 
-    wind_mph: float = 0.0
-    wind_gust_mph: float = 0.0
-    rain_in_hr: float = 0.0
-    snow_in_hr: float = 0.0
+    ``None`` means the provider did not return that field. Missing is not the
+    same as 0: calm air is Low risk, but an empty forecast must not be scored.
+    """
+
+    wind_mph: float | None = None
+    wind_gust_mph: float | None = None
+    rain_in_hr: float | None = None
+    snow_in_hr: float | None = None
     temperature_f: float | None = None
     visibility_mi: float | None = None
     weather_code: int | None = None
 
-    def effective_wind(self, metric: str = "max") -> float:
+    def has_observation(self) -> bool:
+        return any(
+            value is not None
+            for value in (self.wind_mph, self.wind_gust_mph, self.rain_in_hr, self.snow_in_hr)
+        )
+
+    def effective_wind(self, metric: str = "max") -> float | None:
         """Wind figure used for classification.
 
         Gusts, not sustained wind, are what tip a high-profile trailer, and DOT
@@ -115,8 +125,9 @@ class WeatherSample:
         if metric == "sustained":
             return self.wind_mph
         if metric == "gust":
-            return self.wind_gust_mph or self.wind_mph
-        return max(self.wind_mph, self.wind_gust_mph)
+            return self.wind_gust_mph if self.wind_gust_mph is not None else self.wind_mph
+        values = [value for value in (self.wind_mph, self.wind_gust_mph) if value is not None]
+        return max(values) if values else None
 
 
 @dataclass(frozen=True)
@@ -124,16 +135,17 @@ class RiskAssessment:
     """Risk at a single checkpoint, with the reasoning that produced it."""
 
     level: RiskLevel
-    wind: RiskLevel
-    rain: RiskLevel
-    snow: RiskLevel
+    wind: RiskLevel | None
+    rain: RiskLevel | None
+    snow: RiskLevel | None
     driver: str  # which condition set the overall level
-    wind_used_mph: float
+    wind_used_mph: float | None
     reasons: list[str] = field(default_factory=list)
+    available: bool = True
 
     @property
     def score(self) -> int:
-        return int(self.level)
+        return int(self.level) if self.available else -1
 
 
 def assess(
@@ -142,43 +154,71 @@ def assess(
     wind_metric: str = "max",
 ) -> RiskAssessment:
     """Classify one checkpoint, applying the table then the load overrides."""
-    wind_mph = sample.effective_wind(wind_metric)
+    if not sample.has_observation():
+        return RiskAssessment(
+            level=RiskLevel.LOW,
+            wind=None,
+            rain=None,
+            snow=None,
+            driver="none",
+            wind_used_mph=None,
+            reasons=["Weather data unavailable at this checkpoint; risk was not scored as Low."],
+            available=False,
+        )
 
-    wind_level = classify_wind(wind_mph)
-    rain_level = classify_rain(sample.rain_in_hr)
-    snow_level = classify_snow(sample.snow_in_hr)
+    wind_mph = sample.effective_wind(wind_metric)
+    wind_level = classify_wind(wind_mph) if wind_mph is not None else None
+    rain_level = classify_rain(sample.rain_in_hr) if sample.rain_in_hr is not None else None
+    snow_level = classify_snow(sample.snow_in_hr) if sample.snow_in_hr is not None else None
 
     reasons: list[str] = []
 
     # --- Load rules escalate the wind classification -----------------------
-    if wind_mph >= NO_TRAVEL_WIND_MPH:
-        wind_level = RiskLevel.NO_TRAVEL
-        reasons.append(f"Wind {wind_mph:.0f} mph is at or above 55 mph - No Travel for any load")
-    elif 45.0 <= wind_mph < NO_TRAVEL_WIND_MPH and load_lb > HEAVY_LOAD_LB:
-        wind_level = RiskLevel.NO_TRAVEL
-        reasons.append(
-            f"Wind {wind_mph:.0f} mph (45-54) with a {load_lb:,.0f} lb load "
-            f"over 30,000 lb - No Travel"
-        )
-    elif 35.0 <= wind_mph < 45.0 and load_lb > VERY_HEAVY_LOAD_LB:
-        wind_level = RiskLevel.SEVERE
-        reasons.append(
-            f"Wind {wind_mph:.0f} mph (35-44) with a {load_lb:,.0f} lb load "
-            f"over 40,000 lb - escalated to Severe"
+    if wind_mph is not None:
+        if wind_mph >= NO_TRAVEL_WIND_MPH:
+            wind_level = RiskLevel.NO_TRAVEL
+            reasons.append(f"Wind {wind_mph:.0f} mph is at or above 55 mph - No Travel for any load")
+        elif 45.0 <= wind_mph < NO_TRAVEL_WIND_MPH and load_lb > HEAVY_LOAD_LB:
+            wind_level = RiskLevel.NO_TRAVEL
+            reasons.append(
+                f"Wind {wind_mph:.0f} mph (45-54) with a {load_lb:,.0f} lb load "
+                f"over 30,000 lb - No Travel"
+            )
+        elif 35.0 <= wind_mph < 45.0 and load_lb > VERY_HEAVY_LOAD_LB:
+            wind_level = RiskLevel.SEVERE
+            reasons.append(
+                f"Wind {wind_mph:.0f} mph (35-44) with a {load_lb:,.0f} lb load "
+                f"over 40,000 lb - escalated to Severe"
+            )
+
+    components = {
+        name: level
+        for name, level in (("wind", wind_level), ("rain", rain_level), ("snow", snow_level))
+        if level is not None
+    }
+    if not components:
+        return RiskAssessment(
+            level=RiskLevel.LOW,
+            wind=wind_level,
+            rain=rain_level,
+            snow=snow_level,
+            driver="none",
+            wind_used_mph=None if wind_mph is None else round(wind_mph, 1),
+            reasons=["Weather data unavailable at this checkpoint; risk was not scored as Low."],
+            available=False,
         )
 
-    components = {"wind": wind_level, "rain": rain_level, "snow": snow_level}
     level = max(components.values())
     # Ties resolve to wind, then rain, then snow - wind is the condition the
     # load rules act on, so it is the most useful thing to surface.
-    driver = next(name for name in ("wind", "rain", "snow") if components[name] == level)
+    driver = next(name for name in ("wind", "rain", "snow") if components.get(name) == level)
 
     if not reasons and level > RiskLevel.LOW:
-        if driver == "wind":
+        if driver == "wind" and wind_mph is not None:
             reasons.append(f"Wind {wind_mph:.0f} mph - {level.label}")
-        elif driver == "rain":
+        elif driver == "rain" and sample.rain_in_hr is not None:
             reasons.append(f"Rain {sample.rain_in_hr:.2f} in/hr - {level.label}")
-        else:
+        elif sample.snow_in_hr is not None:
             reasons.append(f"Snow {sample.snow_in_hr:.2f} in/hr - {level.label}")
 
     # Mention secondary conditions that are also elevated.
@@ -186,8 +226,8 @@ def assess(
         ("Rain", sample.rain_in_hr, "in/hr"),
         ("Snow", sample.snow_in_hr, "in/hr"),
     ):
-        comp = components[name.lower()]
-        if comp > RiskLevel.LOW and name.lower() != driver:
+        comp = components.get(name.lower())
+        if value is not None and comp is not None and comp > RiskLevel.LOW and name.lower() != driver:
             reasons.append(f"{name} {value:.2f} {unit} - {comp.label}")
 
     return RiskAssessment(
@@ -196,27 +236,32 @@ def assess(
         rain=rain_level,
         snow=snow_level,
         driver=driver,
-        wind_used_mph=round(wind_mph, 1),
+        wind_used_mph=None if wind_mph is None else round(wind_mph, 1),
         reasons=reasons,
     )
 
 
 def assess_score(
-    wind_mph: float,
-    wind_gust_mph: float,
-    rain_in_hr: float,
-    snow_in_hr: float,
+    wind_mph: float | None,
+    wind_gust_mph: float | None,
+    rain_in_hr: float | None,
+    snow_in_hr: float | None,
     load_lb: float,
     wind_metric: str = "max",
 ) -> int:
-    """Fast path returning only the numeric level, used for the heatmap grid."""
+    """Fast path returning only the numeric level, used for the heatmap grid.
+
+    Returns -1 when the sample has no observations so callers do not paint
+    missing weather as Low.
+    """
     sample = WeatherSample(
         wind_mph=wind_mph,
         wind_gust_mph=wind_gust_mph,
         rain_in_hr=rain_in_hr,
         snow_in_hr=snow_in_hr,
     )
-    return int(assess(sample, load_lb, wind_metric).level)
+    result = assess(sample, load_lb, wind_metric)
+    return result.score if result.available else -1
 
 
 def describe_rules() -> dict:

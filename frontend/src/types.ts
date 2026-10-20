@@ -1,6 +1,7 @@
 /** Mirrors the payloads served by the Django API. */
 
 export type RiskLevelSlug = 'LOW' | 'MODERATE' | 'HIGH' | 'SEVERE' | 'NO_TRAVEL'
+export type RiskDisplaySlug = RiskLevelSlug | 'UNKNOWN'
 
 export type RiskDriver = 'wind' | 'rain' | 'snow'
 
@@ -11,22 +12,23 @@ export interface Place {
 }
 
 export interface CheckpointWeather {
-  wind_mph: number
-  wind_gust_mph: number
-  rain_in_hr: number
-  snow_in_hr: number
+  wind_mph: number | null
+  wind_gust_mph: number | null
+  rain_in_hr: number | null
+  snow_in_hr: number | null
   temperature_f: number | null
   visibility_mi: number | null
   weather_code: number | null
 }
 
 export interface CheckpointRisk {
-  level: RiskLevelSlug
+  available?: boolean
+  level: RiskDisplaySlug
   label: string
   score: number
-  driver: RiskDriver
-  wind_used_mph: number
-  components: Record<RiskDriver, RiskLevelSlug>
+  driver: RiskDriver | 'none'
+  wind_used_mph: number | null
+  components: Record<RiskDriver, RiskDisplaySlug>
   reasons: string[]
 }
 
@@ -48,10 +50,11 @@ export interface RouteSummary {
   duration_hours: number
   arrival: string | null
   checkpoint_count: number
-  average_risk: number
-  max_level: RiskLevelSlug
+  average_risk: number | null
+  max_level: RiskDisplaySlug
   max_level_label: string
   blocked: boolean
+  weather_coverage?: number
   miles_by_level: Record<RiskLevelSlug, number>
 }
 
@@ -72,7 +75,7 @@ export interface RankingEntry {
   no_travel_miles: number
   severe_miles: number
   high_miles: number
-  average_risk: number
+  average_risk: number | null
   duration_hours: number
 }
 

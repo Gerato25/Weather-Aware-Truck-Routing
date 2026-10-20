@@ -42,9 +42,14 @@ export function omTileUrl(metric: HeatMetric, timeStep: string): string {
   return `om://${CAPTURE}?${params.toString()}`
 }
 
-export function timeStepForHour(validTimes: string[], hour: number): string {
+export function timeStepForHour(
+  validTimes: string[],
+  hour: number,
+  atIso?: string | null,
+): string {
   if (!validTimes.length) return 'current_time_1H'
-  const target = Date.now() + hour * 3_600_000
+  const target = atIso ? new Date(atIso).getTime() : Date.now() + hour * 3_600_000
+  if (!Number.isFinite(target)) return 'current_time_1H'
   let best = 0
   let bestDist = Number.POSITIVE_INFINITY
   validTimes.forEach((stamp, index) => {

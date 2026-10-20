@@ -22,7 +22,7 @@ export function HeatmapBar({ corridor, loading = false, hour, onHourChange }: He
     <div className="heat-bar">
       <div className="heat-label">
         <span aria-hidden="true">☁</span>
-        <span>Weather Forecast (0–48h)</span>
+        <span>Corridor forecast (0–48h)</span>
       </div>
 
       <input

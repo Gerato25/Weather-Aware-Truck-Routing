@@ -84,15 +84,16 @@ class EvaluatedCheckpoint:
                 "weather_code": self.sample.weather_code,
             },
             "risk": {
-                "level": self.assessment.level.slug,
-                "label": self.assessment.level.label,
+                "available": self.assessment.available,
+                "level": self.assessment.level.slug if self.assessment.available else "UNKNOWN",
+                "label": self.assessment.level.label if self.assessment.available else "Unknown",
                 "score": self.assessment.score,
                 "driver": self.assessment.driver,
                 "wind_used_mph": self.assessment.wind_used_mph,
                 "components": {
-                    "wind": self.assessment.wind.slug,
-                    "rain": self.assessment.rain.slug,
-                    "snow": self.assessment.snow.slug,
+                    "wind": self.assessment.wind.slug if self.assessment.wind else "UNKNOWN",
+                    "rain": self.assessment.rain.slug if self.assessment.rain else "UNKNOWN",
+                    "snow": self.assessment.snow.slug if self.assessment.snow else "UNKNOWN",
                 },
                 "reasons": self.assessment.reasons,
             },
@@ -109,6 +110,8 @@ class EvaluatedRoute:
     average_risk: float = 0.0
     max_level: RiskLevel = RiskLevel.LOW
     arrival: datetime | None = None
+    scored_miles: float = 0.0
+    unscored_miles: float = 0.0
 
     @property
     def distance_miles(self) -> float:
@@ -129,15 +132,19 @@ class EvaluatedRoute:
     def ranking_key(self) -> tuple:
         """The assignment's preference order, most significant first.
 
-        No Travel mileage is checked ahead of Severe: a route the rules forbid
-        outright should never outrank a legal one, however fast it is. Mileages
-        are rounded to a tenth so floating-point noise does not decide a tie.
+        Unscored weather is a last-resort penalty so a missing forecast cannot
+        beat a scored route by looking like zero risk. After that: No Travel,
+        Severe, High, average risk, then travel time. Mileages are rounded to a
+        tenth so floating-point noise does not decide a tie.
         """
+        coverage_penalty = 1 if self.scored_miles <= 0 else 0
+        average = self.average_risk if self.scored_miles > 0 else 9.0
         return (
+            coverage_penalty,
             round(self.miles(RiskLevel.NO_TRAVEL), 1),
             round(self.miles(RiskLevel.SEVERE), 1),
             round(self.miles(RiskLevel.HIGH), 1),
-            round(self.average_risk, 3),
+            round(average, 3),
             self.raw.duration_s,
         )
 
@@ -153,10 +160,15 @@ class EvaluatedRoute:
                 "duration_hours": round(self.duration_hours, 2),
                 "arrival": self.arrival.isoformat() if self.arrival else None,
                 "checkpoint_count": len(self.checkpoints),
-                "average_risk": round(self.average_risk, 3),
-                "max_level": self.max_level.slug,
-                "max_level_label": self.max_level.label,
+                "average_risk": round(self.average_risk, 3) if self.scored_miles > 0 else None,
+                "max_level": self.max_level.slug if self.scored_miles > 0 else "UNKNOWN",
+                "max_level_label": self.max_level.label if self.scored_miles > 0 else "Unknown",
                 "blocked": self.blocked,
+                "weather_coverage": round(
+                    self.scored_miles / (self.scored_miles + self.unscored_miles), 3
+                )
+                if (self.scored_miles + self.unscored_miles) > 0
+                else 0.0,
                 "miles_by_level": {
                     level.slug: round(self.miles(level), 1) for level in RiskLevel
                 },
@@ -282,21 +294,27 @@ def _aggregate(route: EvaluatedRoute) -> None:
     """Roll checkpoint risk up into per-level mileage and an average score."""
     miles_by_level: dict[RiskLevel, float] = {level: 0.0 for level in RiskLevel}
     weighted_score = 0.0
-    total_miles = 0.0
+    scored_miles = 0.0
+    unscored_miles = 0.0
 
     for cp in route.checkpoints:
         segment_miles = meters_to_miles(cp.checkpoint.segment_m)
+        if not cp.assessment.available:
+            unscored_miles += segment_miles
+            continue
         miles_by_level[cp.assessment.level] += segment_miles
         weighted_score += cp.assessment.score * segment_miles
-        total_miles += segment_miles
+        scored_miles += segment_miles
 
     route.miles_by_level = miles_by_level
+    route.scored_miles = scored_miles
+    route.unscored_miles = unscored_miles
     # Distance-weighted so a long stretch of bad weather counts for more than a
-    # single rough checkpoint, regardless of how densely we sampled.
-    route.average_risk = weighted_score / total_miles if total_miles else 0.0
-    route.max_level = max(
-        (cp.assessment.level for cp in route.checkpoints), default=RiskLevel.LOW
-    )
+    # single rough checkpoint, regardless of how densely we sampled. Unscored
+    # miles are excluded so missing weather cannot look like Low risk.
+    route.average_risk = weighted_score / scored_miles if scored_miles else 0.0
+    scored_levels = [cp.assessment.level for cp in route.checkpoints if cp.assessment.available]
+    route.max_level = max(scored_levels, default=RiskLevel.LOW)
 
 
 def _recommendation_reasons(best: EvaluatedRoute, others: list[EvaluatedRoute]) -> list[str]:
@@ -438,7 +456,7 @@ def plan_trip(
                     "no_travel_miles": round(route.miles(RiskLevel.NO_TRAVEL), 1),
                     "severe_miles": round(route.miles(RiskLevel.SEVERE), 1),
                     "high_miles": round(route.miles(RiskLevel.HIGH), 1),
-                    "average_risk": round(route.average_risk, 3),
+                    "average_risk": round(route.average_risk, 3) if route.scored_miles > 0 else None,
                     "duration_hours": round(route.duration_hours, 2),
                 }
                 for route in ranked

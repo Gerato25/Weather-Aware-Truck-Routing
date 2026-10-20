@@ -1,5 +1,5 @@
 import { hoursFromNow, toLocalInputValue } from './format'
-import type { PlanResponse, RiskLevelSlug, TripFormValues } from '../types'
+import type { PlanResponse, RiskDisplaySlug, TripFormValues } from '../types'
 
 const KEY = 'spotter-recent-trips-v1'
 const LIMIT = 5
@@ -10,7 +10,7 @@ export interface RecentTrip {
   loadLb: number
   intervalMiles: 10 | 25 | 50
   recommended: string
-  maxLevel: RiskLevelSlug
+  maxLevel: RiskDisplaySlug
   at: string
 }
 

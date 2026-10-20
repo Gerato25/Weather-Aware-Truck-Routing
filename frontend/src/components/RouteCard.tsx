@@ -26,6 +26,7 @@ export function RouteCard({
 }: RouteCardProps) {
   const { summary } = route
   const severe = Math.round(summary.miles_by_level.SEVERE ?? 0)
+  const high = Math.round(summary.miles_by_level.HIGH ?? 0)
   const badge = recommended
     ? { label: 'Recommended', tone: 'safest' }
     : routeBadge(rank ?? title, summary.blocked)
@@ -61,12 +62,14 @@ export function RouteCard({
         <div>
           <span className="metric-label">Avg Risk</span>
           <span className="metric-value" style={{ color: scoreColor(summary.average_risk) }}>
-            {summary.average_risk.toFixed(2)}
+            {summary.average_risk == null ? '—' : summary.average_risk.toFixed(2)}
           </span>
         </div>
         <div>
-          <span className="metric-label">Severe Miles</span>
-          <span className="metric-value">{severe}</span>
+          <span className="metric-label">Severe / High</span>
+          <span className="metric-value">
+            {severe} / {high}
+          </span>
         </div>
       </div>
 

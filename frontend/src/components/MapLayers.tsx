@@ -8,23 +8,23 @@ interface MapLayersProps {
 
 const LAYER_META: Record<HeatMetric, { label: string; hint: string; swatch: string }> = {
   risk: {
-    label: 'Weather Heatmap',
-    hint: 'Temperature',
-    swatch: 'linear-gradient(90deg, #22c55e, #facc15, #fb923c, #ef4444)',
+    label: 'Corridor risk',
+    hint: 'Load-aware heatmap',
+    swatch: 'linear-gradient(90deg, #22c55e, #facc15, #fb923c, #ef4444, #c026d3)',
   },
   wind: {
     label: 'Wind',
-    hint: 'Speed',
-    swatch: 'linear-gradient(90deg, #bae6fd, #38bdf8, #2563eb)',
+    hint: 'mph along route',
+    swatch: 'linear-gradient(90deg, #86efac, #facc15, #ef4444)',
   },
   rain: {
     label: 'Rain',
-    hint: 'Precipitation',
-    swatch: 'linear-gradient(90deg, #99f6e4, #14b8a6, #0f766e)',
+    hint: 'in/hr along route',
+    swatch: 'linear-gradient(90deg, #86efac, #14b8a6, #0f766e)',
   },
   snow: {
     label: 'Snow',
-    hint: 'Snowfall',
+    hint: 'in/hr along route',
     swatch: 'linear-gradient(90deg, #e0e7ff, #c7d2fe, #ffffff)',
   },
 }
