@@ -98,10 +98,11 @@ export function corridorSampleAt(
   lon: number,
   lat: number,
   hour: number,
-): CorridorHourStats & { level: RiskDisplaySlug } | null {
+): CorridorHourStats & { level: RiskDisplaySlug; cause: string } | null {
   if (!corridor?.points.length) return null
   const index = nearestCorridorIndex(corridor.points, lon, lat)
   const risk = cellAt(corridor.risk, index, hour)
+  const listed = corridor.cause?.[index]?.[Math.max(0, Math.round(hour))]
   return {
     wind: cellAt(corridor.wind, index, hour),
     windDir: cellAt(corridor.wind_dir, index, hour),
@@ -110,6 +111,7 @@ export function corridorSampleAt(
     temp: cellAt(corridor.temperature, index, hour),
     risk,
     level: levelFromScore(risk),
+    cause: listed === 'wind' || listed === 'rain' || listed === 'snow' ? listed : '',
   }
 }
 

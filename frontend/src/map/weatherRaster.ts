@@ -116,6 +116,7 @@ export function addWeatherRaster(map: MapLibreMap, raster: WeatherRaster): Weath
       const lo = Math.min(maxHour, Math.floor(clamped))
       const hi = Math.min(maxHour, lo + 1)
       const frac = show ? clamped - lo : 0
+      const strength = document.documentElement.dataset.theme === 'dark' ? 0.62 : 1
       if (lo !== loHour) {
         loHour = lo
         ensureImageSource(map, SOURCE_A, rasterUrl(raster, lo, mode), coords)
@@ -126,11 +127,11 @@ export function addWeatherRaster(map: MapLibreMap, raster: WeatherRaster): Weath
       }
       if (map.getLayer(LAYER_A)) {
         map.setLayoutProperty(LAYER_A, 'visibility', show ? 'visible' : 'none')
-        map.setPaintProperty(LAYER_A, 'raster-opacity', show ? 1 - frac : 0)
+        map.setPaintProperty(LAYER_A, 'raster-opacity', show ? (1 - frac) * strength : 0)
       }
       if (map.getLayer(LAYER_B)) {
         map.setLayoutProperty(LAYER_B, 'visibility', show ? 'visible' : 'none')
-        map.setPaintProperty(LAYER_B, 'raster-opacity', show ? frac : 0)
+        map.setPaintProperty(LAYER_B, 'raster-opacity', show ? frac * strength : 0)
       }
     },
     remove() {

@@ -44,6 +44,7 @@ import {
   RISK_COLORS,
   riskColor,
   routeColor,
+  routeLineColor,
   type HeatLayers,
 } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
@@ -183,12 +184,14 @@ function routesToGeoJSON(
   routes: Route[],
   selectedRouteId: string | null,
   hiddenIds: Set<string>,
+  theme: Theme = 'light',
 ): FeatureCollection {
   const features: Feature[] = []
   routes.forEach((route, index) => {
     if (hiddenIds.has(route.id)) return
     const selected = route.id === selectedRouteId
-    const identity = routeColor(index)
+    const identity = routeColor(index, theme)
+    const line = routeLineColor(index, theme, selected)
     const checkpoints = route.checkpoints
     if (checkpoints.length < 2) {
       features.push({
@@ -198,7 +201,7 @@ function routesToGeoJSON(
           routeId: route.id,
           label: route.label,
           letter: routeLetter(index),
-          color: identity,
+          color: line,
           identity,
           selected,
         },
@@ -217,7 +220,7 @@ function routesToGeoJSON(
           routeId: route.id,
           label: route.label,
           letter: routeLetter(index),
-          color: identity,
+          color: line,
           identity,
           selected,
         },
@@ -240,7 +243,11 @@ function alongLine(coords: [number, number][], t: number): [number, number] {
   return [a[0] + (b[0] - a[0]) * frac, a[1] + (b[1] - a[1]) * frac]
 }
 
-function routeLabelsToGeoJSON(routes: Route[], hiddenIds: Set<string>): FeatureCollection {
+function routeLabelsToGeoJSON(
+  routes: Route[],
+  hiddenIds: Set<string>,
+  theme: Theme = 'light',
+): FeatureCollection {
   const features: Feature[] = []
   const fractions = [0.14, 0.38, 0.62, 0.86]
   routes.forEach((route, index) => {
@@ -248,7 +255,7 @@ function routeLabelsToGeoJSON(routes: Route[], hiddenIds: Set<string>): FeatureC
     const coords = route.geometry.coordinates
     if (!coords.length) return
     const letter = routeLetter(index)
-    const color = routeColor(index)
+    const color = routeColor(index, theme)
     const latShift = (index - 1) * 0.16
     for (const t of fractions) {
       const [lon, lat] = alongLine(coords, t)
@@ -364,27 +371,43 @@ function checkpointsToGeoJSON(
   routes: Route[],
   selectedRouteId: string | null,
   hiddenIds: Set<string>,
+  theme: Theme = 'light',
+  corridor: CorridorResponse | null = null,
+  hour = 0,
 ): FeatureCollection {
   const features: Feature[] = []
-  routes.forEach((route) => {
+  routes.forEach((route, index) => {
     if (hiddenIds.has(route.id)) return
     const selected = route.id === selectedRouteId
+    const identity = routeColor(index, theme)
     for (const cp of route.checkpoints) {
-      const cause = etaCause(cp)
-      const elevated = cp.risk.available !== false && cp.risk.score >= 1 && cp.risk.level !== 'LOW' ? 1 : 0
-      const windDir = cp.weather.wind_dir_deg ?? 0
-      const hasDir = cp.weather.wind_dir_deg != null ? 1 : 0
+      const overlay = corridor ? corridorSampleAt(corridor, cp.lon, cp.lat, hour) : null
+      const cause = overlay
+        ? overlay.cause === 'wind' || overlay.cause === 'rain' || overlay.cause === 'snow'
+          ? overlay.cause
+          : causeFromValues(overlay.wind, overlay.rain, overlay.snow)
+        : etaCause(cp)
+      const elevated = overlay
+        ? cause !== '' && (overlay.risk ?? 0) >= 1
+          ? 1
+          : 0
+        : cp.risk.available !== false && cp.risk.score >= 1 && cp.risk.level !== 'LOW'
+          ? 1
+          : 0
+      const windDir = overlay?.windDir ?? cp.weather.wind_dir_deg ?? 0
+      const hasDir = (overlay?.windDir != null ? 1 : 0) || (cp.weather.wind_dir_deg != null ? 1 : 0)
       features.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [cp.lon, cp.lat] },
         properties: {
           routeId: route.id,
           index: cp.index,
-          level: cp.risk.level,
-          score: cp.risk.score,
+          level: overlay?.level ?? cp.risk.level,
+          score: overlay?.risk ?? cp.risk.score,
           selected,
           elevated,
           cause: elevated ? cause : '',
+          identity,
           windDir,
           hasDir,
         },
@@ -543,7 +566,7 @@ function tuneDarkBasemap(map: MapLibreMap) {
   const style = map.getStyle()
   for (const layer of style.layers ?? []) {
     if (layer.type === 'background') {
-      map.setPaintProperty(layer.id, 'background-color', '#1b2a3d')
+      map.setPaintProperty(layer.id, 'background-color', '#0a0c10')
     }
   }
 }
@@ -573,7 +596,7 @@ function installWeatherRasters(map: MapLibreMap, timeStep: string) {
 function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
   installWeatherRasters(map, 'current_time_1H')
   registerCauseIcons(map)
-  registerRouteBadges(map)
+  registerRouteBadges(map, theme)
   for (const name of Object.values(SOURCES)) {
     if (!map.getSource(name)) {
       map.addSource(name, { type: 'geojson', data: EMPTY_COLLECTION })
@@ -632,7 +655,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.routes,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#ffffff',
+      'line-color': theme === 'light' ? '#ffffff' : '#0f172a',
       'line-width': [
         'interpolate',
         ['linear'],
@@ -642,7 +665,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         10,
         ['case', ['get', 'selected'], 15, 11],
       ],
-      'line-opacity': 0.95,
+      'line-opacity': theme === 'light' ? 0.95 : 0.8,
     },
   })
 
@@ -689,7 +712,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.checkpoints,
     filter: ['==', ['get', 'elevated'], 0],
     paint: {
-      'circle-color': '#ffffff',
+      'circle-color': theme === 'light' ? '#ffffff' : '#ecfdf5',
       'circle-radius': [
         'interpolate',
         ['linear'],
@@ -701,7 +724,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
       ],
       'circle-opacity': ['case', ['get', 'selected'], 1, 0.92],
       'circle-stroke-width': ['case', ['get', 'selected'], 2.2, 1.6],
-      'circle-stroke-color': riskColorExpression,
+      'circle-stroke-color': theme === 'light' ? riskColorExpression : ['get', 'identity'],
     },
   })
 
@@ -900,7 +923,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     },
     paint: {
       'text-color': riskColorExpression,
-      'text-halo-color': '#ffffff',
+      'text-halo-color': theme === 'light' ? '#ffffff' : '#07111c',
       'text-halo-width': 1.6,
     },
   })
@@ -1032,13 +1055,17 @@ export function MapView({
   const mode = overlayMode ?? overlayFromHeatLayers(heatLayers)
 
   const routeData = useMemo(
-    () => routesToGeoJSON(routes, selectedRouteId, hiddenIds),
-    [routes, selectedRouteId, hiddenIds],
+    () => routesToGeoJSON(routes, selectedRouteId, hiddenIds, theme),
+    [routes, selectedRouteId, hiddenIds, theme],
   )
-  const routeLabelData = useMemo(() => routeLabelsToGeoJSON(routes, hiddenIds), [routes, hiddenIds])
+  const routeLabelData = useMemo(
+    () => routeLabelsToGeoJSON(routes, hiddenIds, theme),
+    [routes, hiddenIds, theme],
+  )
+  const overlayHour = Math.round(heatHour)
   const checkpointData = useMemo(
-    () => checkpointsToGeoJSON(routes, selectedRouteId, hiddenIds),
-    [routes, selectedRouteId, hiddenIds],
+    () => checkpointsToGeoJSON(routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour),
+    [routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour],
   )
   const calloutData = useMemo(
     () => calloutsToGeoJSON(routes, hiddenIds, loadLb),

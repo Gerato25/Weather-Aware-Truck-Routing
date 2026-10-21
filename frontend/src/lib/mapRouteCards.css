@@ -52,16 +52,22 @@
 }
 
 [data-theme='dark'] .map-route-card {
-  background: rgba(15, 23, 42, 0.94);
-  border-color: #334155;
-  color: #e2e8f0;
+  background: #111827;
+  border-color: #1f2937;
+  color: #f9fafb;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='dark'] .map-route-card.is-selected {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.28), 0 10px 24px rgba(0, 0, 0, 0.55);
 }
 
 [data-theme='dark'] .map-route-card-line,
 [data-theme='dark'] .map-route-card-risk {
-  color: #cbd5e1;
+  color: #d1d5db;
 }
 
 [data-theme='dark'] .map-route-card-kicker {
-  color: #6ee7b7;
+  color: #86efac;
 }

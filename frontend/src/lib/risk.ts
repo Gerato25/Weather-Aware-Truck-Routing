@@ -99,9 +99,21 @@ export function scoreLabel(score: number | null | undefined): string {
 
 /** Route line colours, kept off the risk palette (green / yellow / orange / red). */
 export const ROUTE_COLORS = ['#2563eb', '#7c3aed', '#64748b']
+/** Brighter A / B / C on charcoal so the three corridors stay distinct. */
+export const ROUTE_COLORS_DARK = ['#38bdf8', '#c084fc', '#e2e8f0']
 
-export function routeColor(index: number): string {
-  return ROUTE_COLORS[index % ROUTE_COLORS.length]
+function themeNow(): 'light' | 'dark' {
+  if (typeof document === 'undefined') return 'light'
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
+}
+
+export function routeColor(index: number, theme: 'light' | 'dark' = themeNow()): string {
+  const palette = theme === 'dark' ? ROUTE_COLORS_DARK : ROUTE_COLORS
+  return palette[index % palette.length]
+}
+
+export function routeLineColor(index: number, theme: 'light' | 'dark', _selected = false): string {
+  return routeColor(index, theme)
 }
 
 /** Heatmap metrics the corridor view can display. */

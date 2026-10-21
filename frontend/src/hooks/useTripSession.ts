@@ -25,6 +25,7 @@ export function useTripSession() {
 
   const planAbort = useRef<AbortController | null>(null)
   const corridorAbort = useRef<AbortController | null>(null)
+  const corridorPlanId = useRef<string | null>(null)
 
   useEffect(
     () => () => {
@@ -77,6 +78,7 @@ export function useTripSession() {
     setPlanning(true)
     setError(null)
     setCorridorState(null)
+    corridorPlanId.current = null
     setFocused(null)
 
     const payload: PlanPayload = {
@@ -117,34 +119,32 @@ export function useTripSession() {
   useEffect(() => {
     if (!plan) return
     const seeds = mergeCorridorSeeds(plan.routes)
-    if (seeds.length < 2) return
-
-    corridorAbort.current?.abort()
-    const controller = new AbortController()
-    corridorAbort.current = controller
     const planId = plan.generated_at
-    const demoOn = plan.request.demo_scenario === 'load_wind'
+    if (seeds.length < 2) {
+      setCorridorState({ planId, data: null })
+      return
+    }
 
-    fetchCorridor(
-      {
-        seeds,
-        load_lb: plan.request.load_lb,
-        anchor: plan.request.departure,
-        hours: 48,
-        demo_scenario: demoOn ? 'load_wind' : '',
-        route_lines: plan.routes.map((route) => route.geometry.coordinates),
-      },
-      controller.signal,
-    )
+    const demoOn = plan.request.demo_scenario === 'load_wind'
+    corridorPlanId.current = planId
+
+    fetchCorridor({
+      seeds,
+      load_lb: plan.request.load_lb,
+      anchor: plan.request.departure,
+      hours: 48,
+      demo_scenario: demoOn ? 'load_wind' : '',
+      route_lines: plan.routes.map((route) => route.geometry.coordinates),
+    })
       .then((result) => {
+        if (corridorPlanId.current !== planId || !result?.hours) return
         setCorridorState({ planId, data: result })
         setHeatHour((hour) => Math.min(hour, Math.max(0, result.hours.length - 1)))
       })
       .catch((caught) => {
-        if ((caught as Error).name !== 'AbortError') setCorridorState({ planId, data: null })
+        if (corridorPlanId.current !== planId || (caught as Error).name === 'AbortError') return
+        setCorridorState({ planId, data: null })
       })
-
-    return () => controller.abort()
   }, [plan])
 
   const selectRoute = useCallback((routeId: string) => {

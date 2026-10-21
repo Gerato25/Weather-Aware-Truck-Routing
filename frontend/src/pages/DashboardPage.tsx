@@ -267,7 +267,7 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
               checked={form.demoLoadWind}
               onChange={(event) => updateField('demoLoadWind', event.target.checked)}
             />
-            Demo weather: storms move hour by hour (calm at +0h, gone by ~+30h). Re-analyze to apply.
+            Demo weather: wind and rain move hour by hour; snow stays over its stretch for the full 0–48h. Re-analyze to apply.
           </label>
           {plan?.provider.weather === 'demo-fallback' && (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
@@ -349,6 +349,29 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
               </div>
             )}
 
+            <div className="pointer-events-none absolute bottom-3 left-3 z-10">
+              <div className="dash-map-legend flex flex-wrap items-center gap-x-2.5 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[10px] font-semibold leading-4 shadow-sm">
+                {RISK_LEVELS.filter((level) => {
+                  if (level === 'NO_TRAVEL' && !showNoTravel) return false
+                  if (
+                    (overlayMode === 'wind' || overlayMode === 'rain' || overlayMode === 'snow') &&
+                    level === 'LOW'
+                  ) {
+                    return false
+                  }
+                  return true
+                }).map((level) => (
+                  <span key={level} className="inline-flex items-center gap-1" style={{ color: RISK_COLORS[level] }}>
+                    <i
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: RISK_COLORS[level], boxShadow: `0 0 0 1px ${RISK_INK[level]}22` }}
+                    />
+                    {RISK_LABELS[level]}
+                  </span>
+                ))}
+              </div>
+            </div>
+
             {plan && (
               <>
                 <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
@@ -378,16 +401,6 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
                       })}
                     </div>
                     <p className="font-semibold text-slate-800">42 mi corridor</p>
-                    <span className="mt-0.5 flex items-center gap-1.5">
-                      {RISK_LEVELS.filter((level) => level !== 'NO_TRAVEL' || showNoTravel).map((level) => (
-                        <i
-                          key={level}
-                          className="h-2 w-2 rounded-full"
-                          title={RISK_LABELS[level]}
-                          style={{ background: RISK_COLORS[level], boxShadow: `0 0 0 1px ${RISK_INK[level]}22` }}
-                        />
-                      ))}
-                    </span>
                     <p className="mt-1.5 text-[9px] leading-4 text-slate-500">
                       Smooth weather at the slider hour. Dots stay on truck ETA.
                     </p>
@@ -462,7 +475,7 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
         )}
       </main>
 
-      <footer className="bg-[#0b1f3a] text-slate-300">
+      <footer className="bg-[var(--header-bg)] text-[var(--text-dim)]">
         <div className={`${SHELL} flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs`}>
           <p>
             <span className="font-semibold text-white">WeatherRoute</span>

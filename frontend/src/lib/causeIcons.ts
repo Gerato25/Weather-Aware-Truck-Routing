@@ -1,6 +1,6 @@
 import type { Map as MapLibreMap } from 'maplibre-gl'
 
-import { ROUTE_COLORS } from './risk'
+import { ROUTE_COLORS, ROUTE_COLORS_DARK } from './risk'
 
 export const CAUSE_ICONS = {
   wind: 'wind',
@@ -117,10 +117,11 @@ function routeBadgeImage(letter: string, fill: string): ImageData {
 const ROUTE_LETTERS = ['A', 'B', 'C'] as const
 
 /** Painted A/B/C discs so route identity stays readable without depending on map fonts. */
-export function registerRouteBadges(map: MapLibreMap) {
+export function registerRouteBadges(map: MapLibreMap, theme: 'light' | 'dark' = 'light') {
+  const palette = theme === 'dark' ? ROUTE_COLORS_DARK : ROUTE_COLORS
   ROUTE_LETTERS.forEach((letter, index) => {
     const id = `route-${letter}`
     if (map.hasImage(id)) return
-    map.addImage(id, routeBadgeImage(letter, ROUTE_COLORS[index] ?? '#2563eb'), { pixelRatio: 2 })
+    map.addImage(id, routeBadgeImage(letter, palette[index] ?? palette[0]), { pixelRatio: 2 })
   })
 }

@@ -3,7 +3,7 @@ import { Pause, Play } from 'lucide-react'
 import { routeLiveStatus, sampleMetricScore } from '../lib/weatherPath'
 import { formatDateTime } from '../lib/format'
 import type { OverlayMode } from '../lib/corridorHeat'
-import { RISK_COLORS, RISK_LABELS, RISK_LEVELS, rampColor } from '../lib/risk'
+import { RISK_COLORS, rampColor } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
 import type { PlanResponse } from '../types'
 
@@ -40,7 +40,7 @@ function stripGradient(
   const arrival = Math.min(maxHour, Math.max(0.1, route.summary.duration_hours))
   if (!path?.length) {
     const end = (arrival / maxHour) * 100
-    return `linear-gradient(90deg, #e2e8f0 0%, #e2e8f0 ${end.toFixed(2)}%, #e2e8f0 100%)`
+    return `linear-gradient(90deg, var(--track) 0%, var(--track) ${end.toFixed(2)}%, var(--track) 100%)`
   }
   const parts: string[] = []
   for (const sample of path) {
@@ -52,12 +52,12 @@ function stripGradient(
       score < 0
         ? RISK_COLORS.UNKNOWN
         : stormsOnly && score < 1
-          ? '#e2e8f0'
+          ? 'var(--track)'
           : rampColor(score)
     parts.push(`${color} ${pct.toFixed(2)}%`)
   }
   const end = (arrival / maxHour) * 100
-  parts.push(`#e2e8f0 ${end.toFixed(2)}%`, `#e2e8f0 100%`)
+  parts.push(`var(--track) ${end.toFixed(2)}%`, `var(--track) 100%`)
   return `linear-gradient(90deg, ${parts.join(', ')})`
 }
 
@@ -79,7 +79,7 @@ export function CorridorPanel({
   overlayMode,
   overlayAt,
   forecastPlaying,
-  showNoTravel,
+  showNoTravel: _showNoTravel,
   onMode,
   onHour,
   onPlay,
@@ -175,7 +175,7 @@ export function CorridorPanel({
               aria-label={`Forecast hour offset, 0 to ${sliderMax} hours`}
               className="dash-forecast-slider w-full"
               style={{
-                background: `linear-gradient(to right, #2563eb ${fill}%, #e2e8f0 ${fill}%)`,
+                background: `linear-gradient(to right, var(--track-fill) ${fill}%, var(--track) ${fill}%)`,
               }}
               onChange={(event) => onHour(Number(event.target.value))}
               disabled={!plan}
@@ -241,21 +241,6 @@ export function CorridorPanel({
             </div>
           )
         })}
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-2.5 text-[10px] font-semibold">
-        {RISK_LEVELS.filter((level) => {
-          if (level === 'NO_TRAVEL' && !showNoTravel) return false
-          if ((overlayMode === 'wind' || overlayMode === 'rain' || overlayMode === 'snow') && level === 'LOW') {
-            return false
-          }
-          return true
-        }).map((level) => (
-          <span key={level} className="inline-flex items-center gap-1" style={{ color: RISK_COLORS[level] }}>
-            <i className="h-2 w-2 rounded-full" style={{ background: RISK_COLORS[level] }} />
-            {RISK_LABELS[level]}
-          </span>
-        ))}
       </div>
     </section>
   )
