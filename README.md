@@ -1,20 +1,73 @@
 # Weather-Aware Truck Routing
 
-A React + Django app that helps a truck driver pick the **safest** of three routes by scoring forecast weather at timed checkpoints against load weight.
+Take-home app for a truck driver: enter a trip, get **three routes**, score **wind / rain / snow at each checkpoint’s truck ETA**, and pick the safest corridor for the load.
 
-The UI shows every route on a map, risk-colored checkpoints with ETAs, a ranked recommendation, and a corridor weather heatmap with a **0–48 hour** slider that scrubs locally (no refetch per tick).
+- **Hosted app (Render):** [weather-aware-truck-routing-1hp9.onrender.com](https://weather-aware-truck-routing-1hp9.onrender.com/)
+- **GitHub:** [Gerato25/Weather-Aware-Truck-Routing](https://github.com/Gerato25/Weather-Aware-Truck-Routing)
 
-## What the app does
+---
 
-1. The driver enters origin, destination, departure time, load weight, and checkpoint spacing (10 / 25 / 50 miles).
-2. The API fetches **up to three distinct routes** (OpenRouteService truck profile when a key is set, otherwise public OSRM, with forced detours if the router only returns one or two).
-3. Checkpoints are sampled along each geometry. The truck's **ETA at each checkpoint** comes from the provider's per-segment travel times, not a flat average speed.
-4. Open-Meteo hourly wind / rain / snow is interpolated to that ETA and classified with the risk table and load rules below.
-5. Routes are ranked, then drawn on the map with a **corridor** weather heatmap for the selected route. The 0–48h slider only swaps already-fetched hour properties.
+## Assessment requirements
 
-## Risk rules
+What the guide asks for, and where it lives in this app.
 
-Wind, rain, and snow are classified independently; the checkpoint takes the **worst** of the three. Shared band endpoints follow the printed table (rain of 0.25 in/hr is Moderate).
+| Guide | This app |
+| --- | --- |
+| Origin, destination, departure time, load weight | Trip Planner form (`/plan`) |
+| Three route options | OSRM alternatives (OpenRouteService HGV if a key is set) |
+| Sample weather every **10 / 25 / 50** miles | `interval_miles` on `POST /api/plan/` |
+| Weather at the **truck’s ETA**, not a flat speed | Per-edge travel times → checkpoint ETA → Open-Meteo hour |
+| Risk table + load rules | `backend/trucking/risk.py` and the planner legend |
+| Recommend: fewest Severe miles → fewest High miles → lowest average risk → shortest time | Ranking key in `backend/trucking/planner.py` (No Travel miles first, then the guide order) |
+| Map of the routes | MapLibre, all three corridors on one map |
+| Weather heatmap, **0–48 hour** slider | Corridor overlay; slider scrubs already-fetched hours |
+| GitHub repo | [Gerato25/Weather-Aware-Truck-Routing](https://github.com/Gerato25/Weather-Aware-Truck-Routing) |
+| Hosted app | [Render](https://weather-aware-truck-routing-1hp9.onrender.com/) |
+| 5–10 min Loom | outline below; you record it |
+
+---
+
+## Inputs
+
+On **Trip Planner**:
+
+- Origin
+- Destination
+- Departure time
+- Load (lb)
+- Checkpoint spacing: **10**, **25**, or **50** miles
+
+Autocomplete geocodes to lat/lon. Risk uses those coordinates and the ETA at each stop.
+
+---
+
+## Routes
+
+The API returns **up to three distinct routes** (A / B / C) with distance, drive time, and arrival.
+
+- Default router: public **OSRM** alternatives
+- Optional: `OPENROUTESERVICE_API_KEY` for a truck (`driving-hgv`) profile and the entered weight
+
+---
+
+## Weather sampling
+
+Along each geometry the planner drops checkpoints every 10 / 25 / 50 miles and **always includes the destination**.
+
+For each checkpoint:
+
+1. Truck ETA = departure + summed segment times (not average mph)
+2. Open-Meteo hourly wind, gust, rain, snow, temp at that **lat/lon**
+3. Values interpolated to the ETA (mph and in/hr)
+4. Checkpoint risk = worst of wind, rain, and snow, then load rules
+
+**Demo weather** is off unless you check the box. Off = live Open-Meteo. On = scripted storms for a Loom. If Open-Meteo is rate-limited, the UI says so and does **not** invent storms.
+
+---
+
+## Risk table
+
+From the assessment. Shared endpoints stay in the lower band (rain **0.25** in/hr is Moderate).
 
 | Condition | Low | Moderate | High | Severe | No Travel |
 | --- | --- | --- | --- | --- | --- |
@@ -22,70 +75,70 @@ Wind, rain, and snow are classified independently; the checkpoint takes the **wo
 | Rain | < 0.10 in/hr | 0.10–0.25 | 0.25–0.50 | 0.50–1.00 | > 1.00 |
 | Snow | < 0.5 in/hr | 0.5–1.0 | 1.0–2.0 | 2.0–3.0 | > 3.0 |
 
-### Wind metric: gusts, not just sustained
+Wind used for the table is `max(sustained, gust)` (`WIND_RISK_METRIC=max`). Both numbers still show on the checkpoint card.
 
-High-profile trailers fail in **gusts**. DOT high-wind advisories are issued on peak gusts, so classification uses `max(sustained, gust)` (`WIND_RISK_METRIC=max`). The checkpoint card still shows both numbers. Set `WIND_RISK_METRIC=sustained` or `gust` in `.env` to override.
+### Load rules
 
-Load overrides (applied to that wind figure):
+- ≥ 55 mph wind → **No Travel** at any weight
+- 45–54 mph and load > 30,000 lb → **No Travel**
+- 35–44 mph and load > 40,000 lb → **Severe**
 
-- ≥ 55 mph → **No Travel** for any load
-- 45–54 mph **and** load > 30,000 lb → **No Travel**
-- 35–44 mph **and** load > 40,000 lb → **Severe**
+Default demo load is **42,000 lb** (just over 40,000 lb).
 
-The default demo load is **42,000 lb**, just over the 40,000 lb threshold, so 35–44 mph wind becomes Severe. **Demo weather** (40 mph on Route A) is on by default so the Loom shows Route A going Severe and the recommendation switching.
+---
 
-Checkpoints are sampled every 10 / 25 / 50 miles **and always include the destination**, even when the leftover is a few miles (a 1,005 mi / 25 mi trip is 0, 25, …, 1,000, then Denver).
+## Recommendation
 
-### Recommendation order
+Assignment order:
 
-1. Fewest **No Travel** miles (a forbidden stretch never beats a legal one)
-2. Fewest **Severe** miles
-3. Fewest **High** miles
-4. Lowest distance-weighted average risk
-5. Shortest travel time
+1. Fewest **Severe** miles
+2. Fewest **High** miles
+3. Lowest distance-weighted **average risk**
+4. Shortest **travel time**
 
-## Architecture
+This build also ranks **fewest No Travel miles first**, so a forbidden stretch cannot beat a legal one. Then the four guide keys apply.
 
-```
-React (Vite + MapLibre GL)  →  Django REST  →  OSRM / OpenRouteService
-                                            →  Nominatim / Pelias
-                                            →  Open-Meteo
-```
+---
 
-| Piece | Why |
-| --- | --- |
-| **OSRM** (zero-key fallback) | Alternative routes + per-edge duration annotations for accurate ETAs |
-| **OpenRouteService** (optional key) | Real `driving-hgv` truck profile with the entered load as a weight restriction |
-| **Open-Meteo** | No key; batch multi-point hourly forecasts already in mph / inches |
-| **MapLibre + OpenFreeMap** | Vector map, no map-token required |
-| **Heatmap slider** | Corridor points carry `h0…h48` risk; the slider only swaps a paint expression (no refetch) |
+## Map and 0–48h heatmap
 
-The Django process is **stateless** (no database). Forecasts are cached in memory for 15 minutes so repeated plans along the same corridor do not hammer Open-Meteo.
+- All three routes on one map
+- Route color = risk at the **slider hour** (Low / Moderate / High / Severe / No Travel)
+- Checkpoint cards list Severe / High / Low miles
+- Click a stop: **ETA** weather (what the truck meets) and **this location · +Xh** (slider hour)
+- Heatmap tabs: Risk / Wind / Rain / Snow
+- Slider **0–48h** plays already-downloaded corridor hours (no refetch per tick)
 
-## Local setup
+ETA scores do not change when you move the slider.
 
-Requires Python 3.13+ and Node 20+.
+---
+
+## Run locally
+
+Python 3.12+ and Node 20+.
 
 ```powershell
-# Terminal 1 — backend
+# Terminal 1 — API
 cd backend
 python manage.py runserver
 
-# Terminal 2 — frontend
+# Terminal 2 — UI
 cd frontend
 npm install
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173) for the home page, then **Trip Planner** (`/plan`) to search and see the three scored corridors on the same page. Vite proxies `/api` to Django.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) → **Trip Planner** (`/plan`). Vite proxies `/api` to Django.
 
-The first `python manage.py runserver` creates `.venv` and installs Django if needed. After that it is just that one command, same idea as `npm run dev`.
+Optional: `OPENROUTESERVICE_API_KEY` in `backend/.env` ([free key](https://openrouteservice.org/dev/#/signup)).
 
-Optional: set `OPENROUTESERVICE_API_KEY` in `backend/.env` for truck-legal routing. Free key: [openrouteservice.org/dev](https://openrouteservice.org/dev/#/signup).
+### Trip to show the grader
 
-**Good demo trip:** Chicago, IL → Denver, CO, ~2 hours from now, **42,000 lb**, 25-mile checkpoints, with **Demo weather** left on. Route A gets 40 mph wind (Severe at 42k lb); B or C should win.
+**Los Angeles, CA → San Francisco, CA**, **42,000 lb**, **25 mi** checkpoints, **Demo unchecked**.
 
-Route lines are **blue / purple / slate**. Green, yellow, orange, and red are reserved for risk. The Open-Meteo raster overlay covers the map region; corridor sample points still feed checkpoint ETA weather and the local risk strip. ETAs show the browser’s time zone (graders in the US see CT/MT/PT) and “after departure,” not “from now.” Average risk is shown to two decimals so a single Moderate checkpoint does not round to 0.0.
+Leave this evening so the ~7h haul is still on I-5 / CA-99 / US-101 when live SoCal rain starts. Confirm the line under the form: `Weather source: live Open-Meteo…`.
+
+---
 
 ## Tests
 
@@ -94,88 +147,52 @@ cd backend
 python manage.py test trucking
 ```
 
-103 tests cover band edges, load-rule escalation, missing-weather handling, ETA interpolation, mileage rollups, ranking (Severe then High then average risk then time), corridor expansion, and API validation. They do not hit the network.
+Covers band edges, load rules, missing weather, ETA interpolation, mileage rollups, ranking, and corridor grid. No network.
 
-Live smoke test (hits OSRM + Open-Meteo):
+---
 
-```powershell
-.\.venv\Scripts\python.exe backend\smoke_test.py "Chicago, IL" "Philadelphia, PA" 42000 25
-```
+## Hosted app
 
-## Docker / production
+Live on Render (API + UI in one Docker service):
 
-```powershell
-docker compose up --build
-```
+**https://weather-aware-truck-routing-1hp9.onrender.com/**
 
-Then open [http://127.0.0.1:8000](http://127.0.0.1:8000). Gunicorn serves the API and the Vite build from one process.
+Health: `/api/health/`. Free-tier cold start can take about a minute.
 
-### Host on Render
+Redeploy: push this repo; Render uses `render.yaml`. Optional env: `OPENROUTESERVICE_API_KEY`.
 
-1. Push this repo to GitHub.
-2. In Render: **New → Blueprint**, point it at the repo (`render.yaml`).
-3. Optionally paste an OpenRouteService key into `OPENROUTESERVICE_API_KEY`.
-4. After deploy, the public URL is the hosted app. Health check: `/api/health/`.
+---
 
-Free-tier cold starts can take a minute; the first plan after idle may wait on OSRM’s public server as well.
+## Loom (5–10 min)
 
-### Host the UI on Vercel
+1. **Problem** — Shortest is not safest; weather at *arrival time* along the corridor matters.
+2. **Form** — Origin, destination, departure, 42,000 lb, 25-mile sampling. Demo **off**.
+3. **Three routes** — A / B / C on the map; distance, time, Severe / High miles.
+4. **Recommendation** — Fewest Severe → High → average risk → time (No Travel first if any).
+5. **Checkpoints** — Click a stop. ETA after departure, wind vs gust, rain/snow, risk meters.
+6. **Heatmap** — 0–48h slider; Risk / Wind / Rain / Snow. Slider hour ≠ ETA.
+7. **Code** — `backend/trucking/risk.py` (table + load), `planner.py` (ranking), `frontend/src/components/MapView.tsx` (map + slider).
 
-Vercel can serve the React app. It cannot run the Django API. Deploy Django on Render (or another host), then:
-
-1. In the Vercel project, set **Root Directory** to `frontend` (or use the repo-root `vercel.json`).
-2. Add env var **`VITE_API_BASE_URL`** = `https://YOUR-SERVICE.onrender.com/api` (no trailing slash).
-3. Redeploy. Vite inlines that URL at build time, so changing it later needs a new build.
-
-Visiting only the Vercel URL without that env var makes `/api` 404 (Vercel `NOT_FOUND`). Visiting a Django URL that was never given a `frontend/dist` build shows “Frontend build is missing.”
+---
 
 ## API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health/` | Liveness + which router is active |
-| `GET` | `/api/rules/` | Risk table (keeps the UI legend honest) |
+| `GET` | `/api/health/` | Liveness |
+| `GET` | `/api/rules/` | Risk table |
 | `GET` | `/api/geocode/?q=` | Place search |
 | `POST` | `/api/plan/` | Three scored routes + recommendation |
-| `POST` | `/api/corridor/` | 0–48 h heatmap grid for the selected route |
-
-`POST /api/plan/` body:
+| `POST` | `/api/corridor/` | 0–48h heatmap grid |
 
 ```json
 {
-  "origin": "Chicago, IL",
-  "destination": { "lat": 39.7392, "lon": -104.9903, "label": "Denver, CO" },
-  "departure": "2026-10-18T12:00:00Z",
+  "origin": "Los Angeles, CA",
+  "destination": "San Francisco, CA",
+  "departure": "2026-10-21T20:16:00Z",
   "load_lb": 42000,
   "interval_miles": 25
 }
 ```
 
 `interval_miles` must be `10`, `25`, or `50`.
-
-## Loom walkthrough (5–10 min)
-
-Suggested outline for the required recording:
-
-1. **Problem (30 s)** — A loaded truck cannot treat “shortest” as “safest”; wind and precip at *arrival time* along the corridor matter.
-2. **Form (1 min)** — Origin / destination autocomplete, departure, 42k lb load (just over 40,000 lb), 25-mile sampling.
-3. **Routes (2 min)** — Three polylines (blue / purple / slate), Route A/B/C cards, ranking order (No Travel → Severe → High → average → time).
-4. **Checkpoints (2 min)** — Click a stop; show ETA *after departure*, wind vs gust, and Wind/Rain/Snow risk meters matching the badge. Note Denver is the last row.
-5. **Load-rule demo (1 min)** — Demo weather is on: Route A is Severe and drops; recommendation switches. Uncheck it and re-analyze to show live calm weather. Mention `python manage.py test trucking`.
-6. **Heatmap (2 min)** — Play the 0–48 h slider smoothly; switch Wind / Rain / Snow; legend ticks match the table (0.10 / 0.25 / 0.50 / 1.00 for rain).
-7. **Code tour (1 min)** — `backend/trucking/risk.py` (table + load rules + gusts), `planner.py` (ranking key), `frontend/src/components/MapView.tsx` (slider paint swap).
-
-## Project layout
-
-```
-backend/trucking/
-  risk.py          risk table + load rules
-  geo.py           timed route profile + checkpoint sampling
-  planner.py       orchestration + ranking
-  corridor.py      0–48 h heatmap grid
-  weather/         Open-Meteo batch client
-  providers/       OSRM, OpenRouteService, Nominatim
-frontend/src/
-  components/      map, form, cards, heatmap slider
-  api/client.ts    typed fetch wrapper
-```

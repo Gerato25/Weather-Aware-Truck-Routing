@@ -465,6 +465,7 @@ function checkpointPopupHtml(
   overlayAt?: string | null,
   loadLb?: number,
   departureIso?: string | null,
+  expanded = false,
 ): string {
   const { weather, risk } = cp
   const title = name || `Mile ${Math.round(cp.mile)}`
@@ -510,6 +511,17 @@ function checkpointPopupHtml(
       : loadLb
         ? `<span>Load: ${Math.round(loadLb).toLocaleString()} lb</span>`
         : ''
+
+  if (!expanded) {
+    return `
+      <div class="popup is-collapsed" role="button" tabindex="0">
+        <div class="popup-head">
+          <span class="popup-mile">${escapeHtml(title)}</span>
+          <span class="popup-level" style="background:${riskColor(shownLevel)};color:${pillInk}">${escapeHtml(shownLabel)}</span>
+        </div>
+      </div>
+    `
+  }
 
   return `
     <div class="popup">
@@ -1045,6 +1057,7 @@ export function MapView({
   const mapRef = useRef<MapLibreMap | null>(null)
   const popupRef = useRef<Popup | null>(null)
   const popupPinnedRef = useRef(false)
+  const popupExpandedRef = useRef(false)
   const destMarkerRef = useRef<Marker | null>(null)
   const routeCardMarkersRef = useRef<Marker[]>([])
   const wxRef = useRef<WeatherRasterHandle | null>(null)
@@ -1081,7 +1094,7 @@ export function MapView({
     [routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour],
   )
   const calloutData = useMemo(
-    () => calloutsToGeoJSON(routes, hiddenIds, loadLb),
+    () => (routes.length > 1 ? EMPTY_COLLECTION : calloutsToGeoJSON(routes, hiddenIds, loadLb)),
     [routes, hiddenIds, loadLb],
   )
   const endpointData = useMemo(() => endpointsToGeoJSON(origin), [origin])
@@ -1131,7 +1144,10 @@ export function MapView({
     truckData,
   }
 
-  function popupForRef(ref: CheckpointRef): { coordinates: [number, number]; html: string } | null {
+  function popupForRef(
+    ref: CheckpointRef,
+    expanded = popupExpandedRef.current,
+  ): { coordinates: [number, number]; html: string } | null {
     const trip = tripRef.current
     const route = trip.routes.find((item) => item.id === ref.routeId)
     if (!route) return null
@@ -1150,22 +1166,50 @@ export function MapView({
         trip.corridor?.hours[Math.round(trip.heatHour)] ?? null,
         trip.loadLb,
         trip.departureIso,
+        expanded,
       ),
     }
+  }
+
+  function bindCollapsedPopupExpand(popup: Popup, ref: CheckpointRef) {
+    const root = popup.getElement()?.querySelector('.popup.is-collapsed')
+    if (!(root instanceof HTMLElement)) return
+    const expand = () => {
+      popupExpandedRef.current = true
+      const next = popupForRef(ref, true)
+      if (next) popup.setHTML(next.html)
+    }
+    root.addEventListener('click', (event) => {
+      event.stopPropagation()
+      expand()
+    })
+    root.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      expand()
+    })
   }
 
   function showPopup(map: MapLibreMap, coordinates: [number, number], html: string, pinned: boolean) {
     popupRef.current?.remove()
     popupPinnedRef.current = pinned
-    popupRef.current = new Popup({ ...POPUP_OPTIONS, closeButton: pinned })
+    popupRef.current = new Popup({
+      ...POPUP_OPTIONS,
+      closeButton: pinned,
+      maxWidth: html.includes('is-collapsed') ? '240px' : '320px',
+    })
       .setLngLat(coordinates)
       .setHTML(html)
       .addTo(map)
     if (pinned) {
       popupRef.current.on('close', () => {
         popupPinnedRef.current = false
+        popupExpandedRef.current = false
         popupTargetRef.current = null
       })
+    }
+    if (popupTargetRef.current && html.includes('is-collapsed')) {
+      bindCollapsedPopupExpand(popupRef.current, popupTargetRef.current)
     }
     return popupRef.current
   }
@@ -1250,10 +1294,13 @@ export function MapView({
       installInteractions(map, {
         onCheckpointClick: (ref, coordinates) => {
           selectRouteRef.current(ref.routeId)
+          const same = popupPinnedRef.current && popupTargetRef.current?.routeId === ref.routeId && popupTargetRef.current.index === ref.index
+          popupExpandedRef.current = same ? !popupExpandedRef.current : true
           popupTargetRef.current = ref
-          const popup = popupForRef(ref)
+          const popup = popupForRef(ref, popupExpandedRef.current)
           showPopup(map, coordinates, popup?.html ?? '', true).on('close', () => {
             popupPinnedRef.current = false
+            popupExpandedRef.current = false
             popupTargetRef.current = null
             focusRef.current(null)
           })
@@ -1265,7 +1312,7 @@ export function MapView({
             hoverHideRef.current = null
           }
           if (popupPinnedRef.current) return
-          const popup = popupForRef(ref)
+          const popup = popupForRef(ref, false)
           if (popup) showPopup(map, coordinates, popup.html, false)
         },
         onCheckpointLeave: () => {
@@ -1418,7 +1465,9 @@ export function MapView({
     const map = mapRef.current
     if (!ready || !map || !popupPinnedRef.current || !popupTargetRef.current) return
     const popup = popupForRef(popupTargetRef.current)
-    if (popup) popupRef.current?.setHTML(popup.html)
+    if (!popup || !popupRef.current) return
+    popupRef.current.setHTML(popup.html)
+    if (!popupExpandedRef.current) bindCollapsedPopupExpand(popupRef.current, popupTargetRef.current)
   }, [ready, heatHour, corridor])
 
   useEffect(() => {
@@ -1520,21 +1569,10 @@ export function MapView({
     if (!cp) return
 
     map.flyTo({ center: [cp.lon, cp.lat], zoom: Math.max(map.getZoom(), 6.5), duration: 700 })
-    const overlay = corridor ? corridorSampleAt(corridor, cp.lon, cp.lat, heatHour) : null
-    showPopup(
-      map,
-      [cp.lon, cp.lat],
-      checkpointPopupHtml(
-        cp,
-        checkpointName(route, cp, origin, destination),
-        overlay,
-        heatHour,
-        corridor?.hours[Math.round(heatHour)] ?? null,
-        loadLb,
-        departureIso,
-      ),
-      true,
-    )
+    popupExpandedRef.current = false
+    popupTargetRef.current = focused
+    const popup = popupForRef(focused, false)
+    if (popup) showPopup(map, popup.coordinates, popup.html, true)
     // heatHour is read for popup copy only; flying here on every slider tick would
     // yank the camera off the moving truck marker.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fly on focus, not overlay hour

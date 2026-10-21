@@ -1,26 +1,36 @@
 .map-route-card {
   pointer-events: auto;
-  min-width: 7.5rem;
-  max-width: 11.5rem;
-  padding: 6px 8px 7px;
+  min-width: 0;
+  max-width: 14rem;
+  padding: 4px 8px;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
   text-align: left;
   color: #0f172a;
   cursor: pointer;
+  z-index: 1;
+}
+
+.map-route-card.is-compact .map-route-card-title {
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .map-route-card.is-full {
-  min-width: 10.5rem;
-  max-width: 13rem;
+  min-width: 9rem;
+  max-width: 11.5rem;
   padding: 8px 10px 9px;
+  border-radius: 10px;
+  z-index: 2;
 }
 
 .map-route-card.is-selected {
   border-color: #93c5fd;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25), 0 8px 18px rgba(15, 23, 42, 0.14);
+  z-index: 3;
 }
 
 .map-route-card-kicker {

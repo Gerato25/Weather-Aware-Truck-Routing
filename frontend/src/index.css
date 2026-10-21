@@ -2464,6 +2464,16 @@ input[type='range']::-webkit-slider-runnable-track {
   color: var(--text);
 }
 
+.popup.is-collapsed {
+  width: auto;
+  min-width: 9.5rem;
+  cursor: pointer;
+}
+
+.popup.is-collapsed .popup-head {
+  padding: 6px 28px 6px 10px;
+}
+
 .popup-head {
   display: flex;
   align-items: center;

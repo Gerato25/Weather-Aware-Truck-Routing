@@ -139,7 +139,7 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
     snowInitFor.current = plan.generated_at
     const weather = pickWeatherRegion(plan.routes, corridor)
     if (weather) {
-      setOverlayMode(weather.mode)
+      setOverlayMode('all')
       setPanToFocused(true)
       selectRoute(weather.routeId)
       setFocused({ routeId: weather.routeId, index: weather.index })
