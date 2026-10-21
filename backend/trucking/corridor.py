@@ -20,8 +20,9 @@ from .weather.storms import build_demo_scenario
 
 # Lateral offsets from the route centreline, which give the heatmap a corridor
 # with width rather than a thin line of points.
-LATERAL_OFFSETS_MILES = (-20.0, -10.0, 0.0, 10.0, 20.0)
-MAX_CORRIDOR_POINTS = 400
+# Open-Meteo bills every location, so the corridor is three points wide.
+LATERAL_OFFSETS_MILES = (-15.0, 0.0, 15.0)
+MAX_CORRIDOR_POINTS = 180
 DEFAULT_HOURS = 48
 
 

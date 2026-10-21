@@ -1,13 +1,9 @@
-"""MET Norway Locationforecast client - the keyless fallback for Open-Meteo.
+"""MET Norway Locationforecast client - global keyless fallback.
 
-Open-Meteo's free tier is metered per IP, and hosts such as Render share
-outbound IPs between many tenants, so the daily quota can be gone before this
-app makes a call. MET Norway is also keyless, global and hourly for ~60 hours
-(6-hourly after that), which covers the 0-48h window the planner needs.
+Hourly for ~60 hours (6-hourly after that), which covers the 0-48h window.
+Used after NWS, so in practice it fills points outside the United States.
 
 Differences the risk code has to live with:
-- One request per coordinate, so points are grouped onto a 0.1° cell (close to
-  the ~9 km global model behind it) and fetched in parallel.
 - Gusts are only published inside the Nordic model domain; elsewhere the
   sustained wind alone drives the wind band.
 - Precipitation is a single amount, split into rain or snow by the symbol code
@@ -16,20 +12,15 @@ Differences the risk code has to live with:
 
 from __future__ import annotations
 
-import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from django.conf import settings
-from django.core.cache import cache
 
 from ..geo import Coord
 from ..http import UpstreamError, request_json
-from .open_meteo import PointForecast, snap
+from .cell_client import CellForecastClient
+from .open_meteo import PointForecast
 
-logger = logging.getLogger(__name__)
-
-CELL_DEGREES = 0.1
 MS_TO_MPH = 2.236936
 MM_TO_IN = 1 / 25.4
 # Same water-to-snow ratio Open-Meteo uses for its snowfall series (cm per mm).
@@ -57,14 +48,6 @@ _SYMBOL_CODES = (
 )
 
 
-def _cell(coord: Coord) -> Coord:
-    lon, lat = coord
-    return (
-        round(round(lon / CELL_DEGREES) * CELL_DEGREES, 4),
-        round(round(lat / CELL_DEGREES) * CELL_DEGREES, 4),
-    )
-
-
 def _weather_code(symbol: str | None) -> int | None:
     if not symbol:
         return None
@@ -88,65 +71,11 @@ def _snow_fraction(symbol: str | None, temperature_c: float | None) -> float:
     return 0.0
 
 
-class MetNorwayClient:
+class MetNorwayClient(CellForecastClient):
     name = "met-norway"
 
     def __init__(self, base_url: str | None = None) -> None:
         self.base_url = base_url or settings.MET_NORWAY_BASE_URL
-
-    def forecasts(self, coords: list[Coord], forecast_days: int = 3) -> dict[Coord, PointForecast]:
-        """Forecasts keyed by the Open-Meteo grid key, like ``OpenMeteoClient``."""
-        keys = {snap(c) for c in coords}
-        by_cell: dict[Coord, list[Coord]] = {}
-        for key in keys:
-            by_cell.setdefault(_cell(key), []).append(key)
-
-        cells: dict[Coord, PointForecast] = {}
-        missing: list[Coord] = []
-        for cell in by_cell:
-            cached = cache.get(self._cache_key(cell))
-            if cached is not None:
-                cells[cell] = cached
-            else:
-                missing.append(cell)
-
-        errors: list[UpstreamError] = []
-        if missing:
-            workers = max(1, min(settings.MET_NORWAY_MAX_WORKERS, len(missing)))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                for cell, outcome in zip(missing, pool.map(self._fetch_safely, missing)):
-                    if isinstance(outcome, UpstreamError):
-                        errors.append(outcome)
-                        continue
-                    cells[cell] = outcome
-                    cache.set(self._cache_key(cell), outcome, settings.WEATHER_CACHE_SECONDS)
-
-        if errors and not cells:
-            raise errors[0]
-        if errors:
-            # Missing cells stay missing, so those checkpoints are unscored
-            # rather than quietly treated as calm.
-            logger.warning("MET Norway failed for %s of %s cells", len(errors), len(by_cell))
-
-        results: dict[Coord, PointForecast] = {}
-        for cell, members in by_cell.items():
-            forecast = cells.get(cell)
-            if forecast is None:
-                continue
-            for key in members:
-                results[key] = forecast
-        return results
-
-    # -- internals ----------------------------------------------------------
-
-    def _cache_key(self, cell: Coord) -> str:
-        return f"met:{cell[0]:.4f}:{cell[1]:.4f}"
-
-    def _fetch_safely(self, cell: Coord) -> PointForecast | UpstreamError:
-        try:
-            return self._fetch(cell)
-        except UpstreamError as exc:
-            return exc
 
     def _fetch(self, cell: Coord) -> PointForecast:
         payload = request_json(

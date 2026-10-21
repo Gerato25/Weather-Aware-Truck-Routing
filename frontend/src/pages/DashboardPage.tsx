@@ -262,8 +262,11 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
             <p className="mt-2 text-[11px] font-medium text-slate-600">
               {plan.provider.weather === 'open-meteo'
                 ? 'Weather source: live Open-Meteo at each checkpoint lat/lon and truck ETA.'
-                : plan.provider.weather === 'met-norway'
-                  ? 'Weather source: live MET Norway forecast at each checkpoint and truck ETA (Open-Meteo was rate-limited).'
+                : /^(nws|met-norway)(\+|$)/.test(plan.provider.weather)
+                  ? `Weather source: live ${plan.provider.weather
+                      .split('+')
+                      .map((name) => (name === 'nws' ? 'National Weather Service' : 'MET Norway'))
+                      .join(' + ')} forecast at each checkpoint and truck ETA (Open-Meteo was rate-limited).`
                   : plan.provider.weather === 'demo'
                   ? 'Weather source: scripted demo storms (Demo box was checked).'
                   : plan.provider.weather === 'demo-fallback'

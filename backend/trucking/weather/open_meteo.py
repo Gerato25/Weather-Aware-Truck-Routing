@@ -34,7 +34,6 @@ HOURLY_VARIABLES = (
     "snowfall",
     "temperature_2m",
     "relative_humidity_2m",
-    "dew_point_2m",
     "visibility",
     "weather_code",
 )
@@ -110,6 +109,23 @@ def forecasts_for_request(
             logger.warning("Open-Meteo rate limit; using local demo weather")
             return calm_forecasts(coords), True
         raise
+
+
+def _dewpoints(temps_f: list[float | None], humidity: list[float | None]) -> list[float | None]:
+    """Dew point (°F) from temperature and RH via the Magnus formula.
+
+    Derived locally because a tenth hourly variable makes Open-Meteo bill each
+    location as more than one call.
+    """
+    out: list[float | None] = []
+    for temp_f, rh in zip(temps_f, humidity):
+        if temp_f is None or rh is None or rh <= 0:
+            out.append(None)
+            continue
+        temp_c = (temp_f - 32) * 5 / 9
+        gamma = math.log(rh / 100.0) + 17.62 * temp_c / (243.12 + temp_c)
+        out.append(round(243.12 * gamma / (17.62 - gamma) * 9 / 5 + 32, 1))
+    return out
 
 
 def snap(coord: Coord) -> Coord:
@@ -238,9 +254,12 @@ BURST_LIMIT_BACKOFF_S = 120
 
 
 def _default_fallback():
+    # NWS first (U.S., has gusts and snowfall), MET Norway for anything it misses.
+    from .cell_client import FallbackChain
     from .met_norway import MetNorwayClient
+    from .nws import NwsClient
 
-    return MetNorwayClient()
+    return FallbackChain([NwsClient(), MetNorwayClient()])
 
 
 class OpenMeteoClient:
@@ -430,7 +449,7 @@ class OpenMeteoClient:
             snow=floats("snowfall"),
             temperature=floats("temperature_2m"),
             humidity=floats("relative_humidity_2m"),
-            dewpoint=floats("dew_point_2m"),
+            dewpoint=_dewpoints(floats("temperature_2m"), floats("relative_humidity_2m")),
             wind_dir=floats("wind_direction_10m"),
             visibility=floats("visibility"),
             code=ints("weather_code"),

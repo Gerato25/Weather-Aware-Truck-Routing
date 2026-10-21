@@ -139,11 +139,13 @@ PHOTON_BASE_URL = os.getenv("PHOTON_BASE_URL", "https://photon.komoot.io")
 NOMINATIM_BASE_URL = os.getenv("NOMINATIM_BASE_URL", "https://nominatim.openstreetmap.org")
 GEOCODE_CACHE_SECONDS = int(os.getenv("GEOCODE_CACHE_SECONDS", "86400"))
 OPEN_METEO_BASE_URL = os.getenv("OPEN_METEO_BASE_URL", "https://api.open-meteo.com/v1/forecast")
-# Keyless fallback when Open-Meteo answers 429 (its quota is per shared host IP).
+# Keyless fallbacks when Open-Meteo answers 429 (its quota is per shared host
+# IP): the National Weather Service for U.S. points, then MET Norway.
+NWS_BASE_URL = os.getenv("NWS_BASE_URL", "https://api.weather.gov")
 MET_NORWAY_BASE_URL = os.getenv(
     "MET_NORWAY_BASE_URL", "https://api.met.no/weatherapi/locationforecast/2.0/complete"
 )
-MET_NORWAY_MAX_WORKERS = int(os.getenv("MET_NORWAY_MAX_WORKERS", "8"))
+FALLBACK_WEATHER_MAX_WORKERS = int(os.getenv("FALLBACK_WEATHER_MAX_WORKERS", "8"))
 
 # Nominatim and MET Norway both require a User-Agent that identifies the app.
 USER_AGENT = os.getenv(
@@ -155,7 +157,8 @@ HTTP_TIMEOUT_SECONDS = float(os.getenv("HTTP_TIMEOUT_SECONDS", "30"))
 WEATHER_BATCH_SIZE = int(os.getenv("WEATHER_BATCH_SIZE", "40"))
 WEATHER_MAX_WORKERS = int(os.getenv("WEATHER_MAX_WORKERS", "1"))
 WEATHER_MIN_INTERVAL_SECONDS = float(os.getenv("WEATHER_MIN_INTERVAL_SECONDS", "0.4"))
-WEATHER_CACHE_SECONDS = int(os.getenv("WEATHER_CACHE_SECONDS", "900"))
+# Forecast models update hourly, so an hour of caching loses nothing.
+WEATHER_CACHE_SECONDS = int(os.getenv("WEATHER_CACHE_SECONDS", "3600"))
 ROUTE_CACHE_SECONDS = int(os.getenv("ROUTE_CACHE_SECONDS", "3600"))
 
 # Which wind figure drives the risk table. Gusts are what actually overturn a
