@@ -21,18 +21,21 @@ function cardHtml(route: Route, index: number, recommended: boolean): string {
   const letter = routeLetter(index)
   const severe = Math.round(route.summary.miles_by_level.SEVERE + route.summary.miles_by_level.NO_TRAVEL)
   const high = Math.round(route.summary.miles_by_level.HIGH)
+  const low = Math.round(route.summary.miles_by_level.LOW)
+  const riskLine = `<p class="map-route-card-risk"><span style="color:${RISK_COLORS.LOW}">Low ${low} mi</span> · <span style="color:${RISK_COLORS.HIGH}">High ${high} mi</span> · <span style="color:${RISK_COLORS.SEVERE}">Severe+ ${severe} mi</span></p>`
   if (recommended) {
     return `
       <p class="map-route-card-kicker">Recommended</p>
       <p class="map-route-card-title">Route ${letter}</p>
       <p class="map-route-card-line">${formatDuration(route.summary.duration_hours)} · ${formatMiles(route.summary.distance_miles)}</p>
       <p class="map-route-card-line">Arrive ${formatClock(route.summary.arrival)}</p>
-      <p class="map-route-card-risk"><span style="color:${RISK_COLORS.SEVERE}">Severe+ ${severe} mi</span> · <span style="color:${RISK_COLORS.HIGH}">High ${high} mi</span></p>
+      ${riskLine}
     `
   }
   return `
     <p class="map-route-card-title">Route ${letter}</p>
     <p class="map-route-card-line">${formatDuration(route.summary.duration_hours)} · ${formatMiles(route.summary.distance_miles)}</p>
+    ${riskLine}
   `
 }
 

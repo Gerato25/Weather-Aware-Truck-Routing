@@ -289,7 +289,7 @@ def build_area_overlay(
             weather_client, sampled_points, timestamps[-1], request.demo_scenario
         )
         if weather_fallback:
-            scenario = build_demo_scenario(lines)
+            scenario = None
     wind_metric = settings.WIND_RISK_METRIC
     hours = len(timestamps)
 

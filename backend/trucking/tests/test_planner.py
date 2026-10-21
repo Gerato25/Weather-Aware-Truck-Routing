@@ -214,7 +214,7 @@ class AggregationTests(SimpleTestCase):
             )
         )
 
-    def test_daily_weather_limit_falls_back_to_demo_storms(self):
+    def test_daily_weather_limit_stays_dry_not_scripted_storms(self):
         class LimitWeather:
             name = "open-meteo"
 
@@ -237,9 +237,8 @@ class AggregationTests(SimpleTestCase):
         )
         payload = plan_trip(trip(load_lb=42_000), weather_client=LimitWeather(), router=router)
         self.assertEqual(payload["provider"]["weather"], "demo-fallback")
-        self.assertEqual(payload["request"]["demo_scenario"], "load_wind")
-        self.assertEqual(payload["recommendation"]["label"], "Route B")
-        self.assertGreater(payload["routes"][0]["summary"]["miles_by_level"]["NO_TRAVEL"], 0)
+        self.assertEqual(payload["request"]["demo_scenario"], "")
+        self.assertEqual(payload["routes"][0]["summary"]["miles_by_level"]["NO_TRAVEL"], 0)
 
     def test_recommendation_prefers_fewer_severe_miles_over_speed(self):
         payload = self.plan()

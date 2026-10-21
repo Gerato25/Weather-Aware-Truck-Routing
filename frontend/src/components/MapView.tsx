@@ -28,7 +28,7 @@ import { addWeatherRaster, type WeatherRasterHandle } from '../map/weatherRaster
 import { syncDestinationMarker } from '../lib/destinationMarker'
 import { syncRouteCardMarkers } from '../lib/mapRouteCards'
 import { setWeatherHour } from '../lib/weatherArea'
-import { corridorSampleAt } from '../lib/corridorHour'
+import { corridorSampleAt, overlayLevelAt } from '../lib/corridorHour'
 import { compassFromDeg, formatClock, formatEtaRelative, formatForecastStamp } from '../lib/format'
 import { truckAtHour } from '../lib/truckAtHour'
 import {
@@ -42,6 +42,7 @@ import {
   HEAT_LAYER_KEYS,
   HIDDEN_HEAT_LAYERS,
   RISK_COLORS,
+  RISK_LABELS,
   riskColor,
   routeColor,
   routeLineColor,
@@ -185,15 +186,23 @@ function routesToGeoJSON(
   selectedRouteId: string | null,
   hiddenIds: Set<string>,
   theme: Theme = 'light',
+  corridor: CorridorResponse | null = null,
+  hour = 0,
+  mode: OverlayMode = 'all',
 ): FeatureCollection {
   const features: Feature[] = []
   routes.forEach((route, index) => {
     if (hiddenIds.has(route.id)) return
     const selected = route.id === selectedRouteId
     const identity = routeColor(index, theme)
-    const line = routeLineColor(index, theme, selected)
+    const identityLine = routeLineColor(index, theme, selected)
     const checkpoints = route.checkpoints
+    const colorFor = (lon: number, lat: number, fallback: typeof checkpoints[number]['risk']['level']) => {
+      if (mode === 'off') return identityLine
+      return riskColor(overlayLevelAt(corridor, lon, lat, hour, mode, fallback))
+    }
     if (checkpoints.length < 2) {
+      const start = route.geometry.coordinates[0]
       features.push({
         type: 'Feature',
         geometry: route.geometry,
@@ -201,7 +210,7 @@ function routesToGeoJSON(
           routeId: route.id,
           label: route.label,
           letter: routeLetter(index),
-          color: line,
+          color: start ? colorFor(start[0], start[1], 'UNKNOWN') : identityLine,
           identity,
           selected,
         },
@@ -220,7 +229,7 @@ function routesToGeoJSON(
           routeId: route.id,
           label: route.label,
           letter: routeLetter(index),
-          color: line,
+          color: colorFor(from.lon, from.lat, from.risk.level),
           identity,
           selected,
         },
@@ -480,14 +489,17 @@ function checkpointPopupHtml(
         ? `+${hour}h`
         : 'this hour'
   const overlayDir = overlay?.windDir != null ? compassFromDeg(overlay.windDir) : null
+  const shownLevel = overlay?.level ?? risk.level
+  const shownLabel = overlay ? RISK_LABELS[overlay.level] : risk.label
+  const pillInk = shownLevel === 'MODERATE' || shownLevel === 'UNKNOWN' ? '#0f172a' : '#ffffff'
   const overlayRows = overlay
     ? `
-      <p class="popup-overlay-label">Forecast at this location at ${overlayStamp}</p>
+      <p class="popup-overlay-label">This location · ${overlayStamp}</p>
       <dl class="popup-grid">
         <div><dt>Wind</dt><dd>${popupNumber(overlay.wind, 0, ' mph')}${overlayDir ? ` ${escapeHtml(overlayDir)}` : ''}</dd></div>
         <div><dt>Rain</dt><dd>${popupNumber(overlay.rain, 2, ' in/hr')}</dd></div>
         <div><dt>Snow</dt><dd>${popupNumber(overlay.snow, 1, ' in/hr')}</dd></div>
-        <div><dt>Temp</dt><dd>${popupNumber(overlay.temp, 0, '°F')}</dd></div>
+        <div><dt>Risk</dt><dd>${escapeHtml(RISK_LABELS[overlay.level])}</dd></div>
       </dl>
     `
     : ''
@@ -501,8 +513,9 @@ function checkpointPopupHtml(
 
   return `
     <div class="popup">
-      <div class="popup-head" style="--level-color:${riskColor(overlay?.level ?? risk.level)}">
+      <div class="popup-head">
         <span class="popup-mile">${escapeHtml(title)}</span>
+        <span class="popup-level" style="background:${riskColor(shownLevel)};color:${pillInk}">${escapeHtml(shownLabel)}</span>
       </div>
       ${overlayRows}
       <p class="popup-overlay-label">ETA ${escapeHtml(etaRelative ?? formatClock(cp.eta))} · ${escapeHtml(formatClock(cp.eta))}</p>
@@ -655,7 +668,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.routes,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': theme === 'light' ? '#ffffff' : '#0f172a',
+      'line-color': ['get', 'identity'],
       'line-width': [
         'interpolate',
         ['linear'],
@@ -665,7 +678,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         10,
         ['case', ['get', 'selected'], 15, 11],
       ],
-      'line-opacity': theme === 'light' ? 0.95 : 0.8,
+      'line-opacity': theme === 'light' ? 0.55 : 0.7,
     },
   })
 
@@ -1053,16 +1066,16 @@ export function MapView({
 
   const hiddenIds = useMemo(() => new Set(hiddenRouteIds), [hiddenRouteIds])
   const mode = overlayMode ?? overlayFromHeatLayers(heatLayers)
+  const overlayHour = Math.round(heatHour)
 
   const routeData = useMemo(
-    () => routesToGeoJSON(routes, selectedRouteId, hiddenIds, theme),
-    [routes, selectedRouteId, hiddenIds, theme],
+    () => routesToGeoJSON(routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour, mode),
+    [routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour, mode],
   )
   const routeLabelData = useMemo(
     () => routeLabelsToGeoJSON(routes, hiddenIds, theme),
     [routes, hiddenIds, theme],
   )
-  const overlayHour = Math.round(heatHour)
   const checkpointData = useMemo(
     () => checkpointsToGeoJSON(routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour),
     [routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour],

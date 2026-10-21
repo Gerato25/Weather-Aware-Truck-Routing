@@ -9,9 +9,10 @@ import {
   formatWeather,
   shortPlaceName,
 } from '../../lib/format'
-import { RISK_COLORS, RISK_LABELS } from '../../lib/risk'
+import { corridorSampleAt } from '../../lib/corridorHour'
+import { classifyRain, classifySnow, classifyWind, RISK_COLORS, RISK_LABELS } from '../../lib/risk'
 import { routeLetter } from '../../lib/routeMeta'
-import type { Checkpoint, RiskDisplaySlug, Route } from '../../types'
+import type { Checkpoint, CorridorResponse, RiskDisplaySlug, Route } from '../../types'
 
 interface CheckpointDetailsProps {
   route: Route
@@ -21,6 +22,9 @@ interface CheckpointDetailsProps {
   destination: string
   loadLb: number
   departure: string
+  corridor?: CorridorResponse | null
+  heatHour?: number
+  overlayAt?: string | null
 }
 
 const METER_WIDTH: Record<RiskDisplaySlug, number> = {
@@ -68,8 +72,12 @@ export function CheckpointDetails({
   destination,
   loadLb,
   departure,
+  corridor = null,
+  heatHour = 0,
+  overlayAt = null,
 }: CheckpointDetailsProps) {
   const weather = checkpoint.weather
+  const overlay = corridorSampleAt(corridor, checkpoint.lon, checkpoint.lat, heatHour)
   const relative = etaOffset(checkpoint.eta, departure)
   const windUsed =
     checkpoint.risk.wind_used_mph != null && Number.isFinite(checkpoint.risk.wind_used_mph)
@@ -142,6 +150,47 @@ export function CheckpointDetails({
         )}
         <p>{reasonCopy(checkpoint, loadLb)}</p>
       </div>
+
+      {overlay && (
+        <div className="mt-4 rounded-lg border border-slate-200 px-2.5 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              This location · +{Math.round(heatHour)}h
+              {overlayAt ? ` · ${formatForecastStamp(overlayAt)}` : ''}
+            </p>
+            <span className="cp-pill shrink-0" data-level={overlay.level}>
+              {badgeLabel(overlay.level)}
+            </span>
+          </div>
+          <dl className="mt-2 grid grid-cols-4 gap-1.5">
+            <WeatherTile
+              icon={<Wind strokeWidth={1.75} className="h-5 w-5" />}
+              value={formatWeather(overlay.wind, 0, ' mph')}
+              hint={overlay.windDir != null ? compassFromDeg(overlay.windDir) || 'Wind' : 'Wind mph'}
+            />
+            <WeatherTile
+              icon={<CloudRain strokeWidth={1.75} className="h-5 w-5" />}
+              value={formatWeather(overlay.rain, 2, ' in/hr')}
+              hint="Rain in/hr"
+            />
+            <WeatherTile
+              icon={<Snowflake strokeWidth={1.75} className="h-5 w-5" />}
+              value={formatWeather(overlay.snow, 1, ' in/hr')}
+              hint="Snow in/hr"
+            />
+            <WeatherTile
+              icon={<Thermometer strokeWidth={1.75} className="h-5 w-5" />}
+              value={formatWeather(overlay.temp, 0, '°F')}
+              hint="Temp °F"
+            />
+          </dl>
+          <div className="mt-2 space-y-2">
+            <RiskMeter label="Wind Risk" level={classifyWind(overlay.wind ?? 0)} />
+            <RiskMeter label="Rain Risk" level={classifyRain(overlay.rain ?? 0)} />
+            <RiskMeter label="Snow Risk" level={classifySnow(overlay.snow ?? 0)} />
+          </div>
+        </div>
+      )}
 
       <div className="mt-4">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">

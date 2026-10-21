@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, fetchCorridor, planTrip, type PlanPayload } from '../api/client'
 import { mergeCorridorSeeds } from '../lib/corridorHeat'
 import { INITIAL_FORM } from '../lib/demoTrips'
-import { fromLocalInputValue } from '../lib/format'
+import { fromLocalInputValue, hoursFromNow, toLocalInputValue } from '../lib/format'
 import { rememberTrip } from '../lib/recentTrips'
 import { DEFAULT_HEAT_LAYERS } from '../lib/risk'
 import type { CheckpointRef } from '../components/MapView'
@@ -34,6 +34,17 @@ export function useTripSession() {
     },
     [],
   )
+
+  useEffect(() => {
+    setForm((current) => {
+      const fromLa =
+        current.origin.includes('Los Angeles') && current.destination.includes('San Francisco')
+      if (!fromLa) return current
+      const depart = new Date(fromLocalInputValue(current.departure)).getTime()
+      if (!Number.isFinite(depart) || depart > Date.now() + 8 * 3_600_000) return current
+      return { ...current, departure: toLocalInputValue(hoursFromNow(18)) }
+    })
+  }, [])
 
   const updateField = useCallback(
     <K extends keyof TripFormValues>(key: K, value: TripFormValues[K]) => {
@@ -101,7 +112,7 @@ export function useTripSession() {
         destination: result.request.destination.label,
         originPlace: result.request.origin,
         destinationPlace: result.request.destination,
-        demoLoadWind: current.demoLoadWind || result.request.demo_scenario === 'load_wind',
+        demoLoadWind: current.demoLoadWind,
       }))
       rememberTrip(result)
       return true

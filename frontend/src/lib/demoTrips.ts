@@ -1,16 +1,16 @@
 import { hoursFromNow, toLocalInputValue } from './format'
 import type { TripFormValues } from '../types'
 
-/** Chicago–Denver is a long-haul plains corridor (~1,000 mi) with three distinct alternatives. */
+/** I-5 / CA-99 / US-101. Leave this evening so the 7h haul crosses live SoCal rain. */
 export const INITIAL_FORM: TripFormValues = {
-  origin: 'Chicago, IL',
-  destination: 'Denver, CO',
-  originPlace: { label: 'Chicago, IL', lat: 41.8781, lon: -87.6298 },
-  destinationPlace: { label: 'Denver, CO', lat: 39.7392, lon: -104.9903 },
-  departure: toLocalInputValue(hoursFromNow(2)),
+  origin: 'Los Angeles, CA',
+  destination: 'San Francisco, CA',
+  originPlace: { label: 'Los Angeles, CA', lat: 34.0522, lon: -118.2437 },
+  destinationPlace: { label: 'San Francisco, CA', lat: 37.7749, lon: -122.4194 },
+  departure: toLocalInputValue(hoursFromNow(18)),
   loadLb: 42_000,
   intervalMiles: 25,
-  demoLoadWind: true,
+  demoLoadWind: false,
 }
 
 export interface DemoTrip {
@@ -24,6 +24,15 @@ export interface DemoTrip {
 }
 
 export const DEMO_TRIPS: DemoTrip[] = [
+  {
+    id: 'lax-sfo-rain',
+    title: 'California haul',
+    origin: 'Los Angeles, CA',
+    destination: 'San Francisco, CA',
+    loadLb: 42_000,
+    intervalMiles: 25,
+    why: 'I-5, CA-99, and US-101. Depart this evening so rain hits before San Francisco.',
+  },
   {
     id: 'chi-den-heavy',
     title: 'Plains haul',
@@ -59,7 +68,7 @@ export function formFromDemo(trip: DemoTrip): TripFormValues {
     destination: trip.destination,
     originPlace: null,
     destinationPlace: null,
-    departure: toLocalInputValue(hoursFromNow(2)),
+    departure: toLocalInputValue(hoursFromNow(trip.origin.includes('Los Angeles') ? 18 : 2)),
     loadLb: trip.loadLb,
     intervalMiles: trip.intervalMiles,
     demoLoadWind: false,

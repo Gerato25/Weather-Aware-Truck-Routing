@@ -88,10 +88,9 @@ class RasterOverlayTests(SimpleTestCase):
             FakeWeather(lambda lon, lat: {"wind": 5.0, "gust": 5.0}),
         )
 
-        def max_red(hour: int, metric: str = "wind") -> int:
-            image = Image.open(io.BytesIO(bundle.png(hour, metric)))
-            pixels = [pixel[0] for pixel in image.getdata() if pixel[3] > 40]
-            return max(pixels) if pixels else 0
+        def max_red(hour: int) -> int:
+            image = Image.open(io.BytesIO(bundle.png(hour)))
+            return max(pixel[0] for pixel in image.getdata() if pixel[3] > 40)
 
         self.assertGreater(max_red(8), max_red(0))
 
@@ -115,6 +114,6 @@ class RasterOverlayTests(SimpleTestCase):
             image = Image.open(io.BytesIO(bundle.png(hour, metric)))
             return sum(1 for pixel in image.getdata() if pixel[3] > 20)
 
-        self.assertGreater(opaque(0, "snow"), 0)
+        self.assertEqual(opaque(0, "snow"), 0)
         self.assertGreater(opaque(8, "snow"), 0)
         self.assertGreater(opaque(0, "risk"), opaque(0, "snow"))

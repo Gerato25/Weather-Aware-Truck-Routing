@@ -224,14 +224,14 @@ def build_demo_scenario(route_lines: list[list[Coord]]) -> DemoScenario:
             Storm(
                 kind="snow",
                 origin=snow_origin,
-                start_h=-1.0,
-                peak_start_h=0.0,
-                peak_end_h=48.0,
-                end_h=49.0,
-                speed_mph=0.0,
-                heading_deg=snow_bearing,
+                start_h=1.5,
+                peak_start_h=6.0,
+                peak_end_h=12.0,
+                end_h=30.0,
+                speed_mph=16.0,
+                heading_deg=snow_bearing,  # slides along Route C
                 along_miles=55.0,
-                cross_miles=22.0,
+                cross_miles=14.0,
                 peak_value=2.55,  # Severe snow band
                 hit_hour=snow_hit,
             ),

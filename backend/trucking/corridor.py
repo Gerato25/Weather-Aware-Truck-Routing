@@ -8,7 +8,7 @@ instead of refetching on every tick.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
@@ -125,9 +125,7 @@ def build_heatmap(
             client, points, timestamps[-1], request.demo_scenario
         )
         if weather_fallback:
-            lines = [list(line) for line in request.route_lines if len(line) >= 2]
-            scenario = build_demo_scenario(lines or [request.seeds])
-            request = replace(request, demo_scenario="load_wind")
+            scenario = None
 
     wind_metric = settings.WIND_RISK_METRIC
     risk_grid: list[list[int]] = []

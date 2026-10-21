@@ -330,8 +330,8 @@ def build_and_cache_rasters(
             weather_client, thin or list(request.seeds), timestamps[-1], request.demo_scenario
         )
         if weather_fallback:
-            scenario = build_demo_scenario(lines)
-            live = {}
+            scenario = None
+            live = live or {}
     wind_metric = settings.WIND_RISK_METRIC
 
     fade = [[0.0] * cols for _ in range(rows)]

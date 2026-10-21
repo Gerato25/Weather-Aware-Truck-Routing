@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CalendarClock,
   Flag,
@@ -19,11 +19,12 @@ import { RouteCompareStrip, RouteDetails } from '../components/dashboard/RouteDe
 import type { useTripSession } from '../hooks/useTripSession'
 import type { Page } from '../lib/navigation'
 import type { Theme } from '../lib/theme'
+import { nearestCorridorIndex } from '../lib/corridorHour'
 import { formatForecastStamp } from '../lib/format'
 import type { OverlayMode } from '../lib/corridorHeat'
 import { RISK_COLORS, RISK_INK, RISK_LABELS, RISK_LEVELS, routeColor } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
-import type { Checkpoint } from '../types'
+import type { Checkpoint, CorridorResponse, Route } from '../types'
 
 type Session = ReturnType<typeof useTripSession>
 
@@ -55,6 +56,49 @@ function pickCheckpoint(route: { checkpoints: Checkpoint[] }): Checkpoint | null
   return inner[Math.floor(inner.length / 2)] ?? points[0]
 }
 
+const SNOW_SELECT = 0.01
+const RAIN_SELECT = 0.1
+
+function valueAtHour(
+  rows: (number | null)[][] | undefined,
+  cell: number,
+  hour: number,
+  min: number,
+): number | null {
+  const value = rows?.[cell]?.[hour]
+  if (value == null || !Number.isFinite(value) || value < min) return null
+  return value
+}
+
+/** Precip the truck actually meets at a stop’s ETA — not weather after arrival. */
+function pickWeatherRegion(
+  routes: Route[],
+  corridor: CorridorResponse | null,
+): { routeId: string; index: number; hour: number; mode: 'snow' | 'rain' } | null {
+  if (!corridor?.points.length) return null
+  let snowBest: { routeId: string; index: number; hour: number; peak: number } | null = null
+  let rainBest: { routeId: string; index: number; hour: number; peak: number } | null = null
+  for (const route of routes) {
+    const arriveHour = Math.max(0, Math.ceil(route.summary.duration_hours))
+    for (const checkpoint of route.checkpoints) {
+      const hour = Math.max(0, Math.min(arriveHour, Math.round(checkpoint.elapsed_minutes / 60)))
+      const cell = nearestCorridorIndex(corridor.points, checkpoint.lon, checkpoint.lat)
+      const snow = valueAtHour(corridor.snow, cell, hour, SNOW_SELECT)
+      if (snow != null && (!snowBest || snow > snowBest.peak)) {
+        snowBest = { routeId: route.id, index: checkpoint.index, hour, peak: snow }
+      }
+      const rain = valueAtHour(corridor.rain, cell, hour, RAIN_SELECT)
+      if (rain != null && (!rainBest || rain > rainBest.peak)) {
+        rainBest = { routeId: route.id, index: checkpoint.index, hour, peak: rain }
+      }
+    }
+  }
+  if (snowBest && snowBest.peak >= 0.5) return { ...snowBest, mode: 'snow' }
+  if (rainBest) return { ...rainBest, mode: 'rain' }
+  if (snowBest) return { ...snowBest, mode: 'snow' }
+  return null
+}
+
 export function DashboardPage({ session, theme, onTheme, onNavigate }: DashboardPageProps) {
   const {
     form,
@@ -78,21 +122,37 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
   const [rasterAvailable, setRasterAvailable] = useState(false)
   const [forecastPlaying, setForecastPlaying] = useState(false)
   const [panToFocused, setPanToFocused] = useState(false)
+  const snowInitFor = useRef<string | null>(null)
 
   useEffect(() => {
     setHiddenRouteIds([])
-    setOverlayMode('all')
     setForecastPlaying(false)
-    setPanToFocused(false)
     if (!plan) {
+      snowInitFor.current = null
+      setOverlayMode('all')
+      setPanToFocused(false)
       setFocused(null)
       return
     }
+    if (!corridor) return
+    if (snowInitFor.current === plan.generated_at) return
+    snowInitFor.current = plan.generated_at
+    const weather = pickWeatherRegion(plan.routes, corridor)
+    if (weather) {
+      setOverlayMode(weather.mode)
+      setPanToFocused(true)
+      selectRoute(weather.routeId)
+      setFocused({ routeId: weather.routeId, index: weather.index })
+      setHeatHour(weather.hour)
+      return
+    }
+    setOverlayMode('all')
+    setPanToFocused(false)
     const route =
       plan.routes.find((item) => item.id === plan.recommendation.route_id) ?? plan.routes[0]
     const checkpoint = route ? pickCheckpoint(route) : null
     setFocused(checkpoint ? { routeId: route.id, index: checkpoint.index } : null)
-  }, [plan, plan?.generated_at, setFocused])
+  }, [plan, plan?.generated_at, corridor, selectRoute, setFocused, setHeatHour])
 
   const revealRoute = useCallback(
     (routeId: string) => {
@@ -118,13 +178,8 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
       revealRoute(ref.routeId)
       setPanToFocused(true)
       setFocused(ref)
-      const route = plan?.routes.find((item) => item.id === ref.routeId)
-      const checkpoint = route?.checkpoints.find((item) => item.index === ref.index)
-      if (checkpoint) {
-        setHeatHour(Math.max(0, Math.min(48, Math.round(checkpoint.elapsed_minutes / 60))))
-      }
     },
-    [plan, revealRoute, setFocused, setHeatHour],
+    [revealRoute, setFocused],
   )
 
   const toggleRouteVisible = useCallback(
@@ -148,9 +203,9 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
     [plan, selectedRouteId, selectRoute, setFocused],
   )
 
-  const overlayHasData =
-    rasterAvailable ||
-    Boolean(corridor?.raster || corridor?.arrows?.features.length || corridor?.points.length)
+  const overlayHasData = Boolean(
+    corridor?.raster || corridor?.arrows?.features.length || corridor?.points.length,
+  )
   const focusedRoute = plan?.routes.find((route) => route.id === focused?.routeId) ?? null
   const focusedCheckpoint =
     focusedRoute && focused
@@ -267,11 +322,23 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
               checked={form.demoLoadWind}
               onChange={(event) => updateField('demoLoadWind', event.target.checked)}
             />
-            Demo weather: wind and rain move hour by hour; snow stays over its stretch for the full 0–48h. Re-analyze to apply.
+            Demo weather: scripted storms for the Loom. Off = live Open-Meteo at each lat/lon. Re-analyze to apply.
           </label>
+          {plan && (
+            <p className="mt-2 text-[11px] font-medium text-slate-600">
+              {plan.provider.weather === 'open-meteo'
+                ? 'Weather source: live Open-Meteo at each checkpoint lat/lon and truck ETA.'
+                : plan.provider.weather === 'demo'
+                  ? 'Weather source: scripted demo storms (Demo box was checked).'
+                  : plan.provider.weather === 'demo-fallback'
+                    ? 'Weather source: Open-Meteo unavailable. Dry placeholders only — not scripted storms.'
+                    : `Weather source: ${plan.provider.weather}`}
+            </p>
+          )}
           {plan?.provider.weather === 'demo-fallback' && (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
-              Live Open-Meteo hit today&apos;s request limit. Showing demo storms so you can keep working.
+              Live Open-Meteo hit today&apos;s request limit. Risk is scored as calm/dry until the quota resets. Uncheck
+              Demo and try again later for exact weather.
             </div>
           )}
           {error && (
@@ -402,7 +469,7 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
                     </div>
                     <p className="font-semibold text-slate-800">42 mi corridor</p>
                     <p className="mt-1.5 text-[9px] leading-4 text-slate-500">
-                      Smooth weather at the slider hour. Dots stay on truck ETA.
+                      Route color is risk at the slider hour. Cards list Severe / High / Low miles.
                     </p>
                   </div>
                 </div>
@@ -434,6 +501,9 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
                   destination={plan.request.destination.label}
                   loadLb={plan.request.load_lb}
                   departure={plan.request.departure}
+                  corridor={corridor}
+                  heatHour={heatHour}
+                  overlayAt={overlayAt}
                 />
               ) : (
                 <p className="px-2 py-4 text-center text-xs leading-5 text-slate-500">
@@ -448,6 +518,7 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
 
         <CorridorPanel
           plan={plan}
+          corridor={corridor}
           selectedRouteId={selectedRouteId}
           heatHour={heatHour}
           sliderMax={sliderMax}

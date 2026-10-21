@@ -1,11 +1,12 @@
 import { Pause, Play } from 'lucide-react'
 
+import { corridorHourStats } from '../lib/corridorHour'
 import { routeLiveStatus, sampleMetricScore } from '../lib/weatherPath'
 import { formatDateTime } from '../lib/format'
 import type { OverlayMode } from '../lib/corridorHeat'
 import { RISK_COLORS, rampColor } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
-import type { PlanResponse } from '../types'
+import type { CorridorResponse, PlanResponse } from '../types'
 
 const AXIS_TICKS = [0, 6, 12, 18, 24, 30, 36, 42, 48]
 const MODES: Array<{ id: OverlayMode; label: string }> = [
@@ -19,6 +20,7 @@ const THUMB_INSET = 8
 
 interface CorridorPanelProps {
   plan: PlanResponse | null
+  corridor?: CorridorResponse | null
   selectedRouteId: string | null
   heatHour: number
   sliderMax: number
@@ -71,8 +73,19 @@ function axisLeft(pct: number): string {
   return `calc(${THUMB_INSET}px + (100% - ${THUMB_INSET * 2}px) * ${t})`
 }
 
+function hourStatLine(corridor: CorridorResponse | null | undefined, hour: number): string | null {
+  const stats = corridorHourStats(corridor ?? null, hour)
+  if (!stats) return null
+  const wind = stats.wind == null ? '—' : `${Math.round(stats.wind)} mph`
+  const rain = stats.rain == null ? '—' : `${stats.rain.toFixed(2)} in/hr`
+  const snow = stats.snow == null ? '—' : `${stats.snow.toFixed(1)} in/hr`
+  const temp = stats.temp == null ? '—' : `${Math.round(stats.temp)}°F`
+  return `Corridor peak · wind ${wind} · rain ${rain} · snow ${snow} · ${temp}`
+}
+
 export function CorridorPanel({
   plan,
+  corridor = null,
   selectedRouteId,
   heatHour,
   sliderMax,
@@ -93,6 +106,7 @@ export function CorridorPanel({
       ? Math.min(1, recommended.summary.duration_hours / sliderMax)
       : null
   const stripRows = plan?.routes.length ?? 0
+  const corridorLine = hourStatLine(corridor, heatHour)
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm sm:px-4">
@@ -135,10 +149,17 @@ export function CorridorPanel({
             <Play className="h-3.5 w-3.5" fill="currentColor" />
           )}
         </button>
-        <p className="ml-auto shrink-0 text-xs font-semibold tabular-nums text-slate-700">
-          {formatHourOffset(heatHour)}
-          {overlayAt ? ` ${formatDateTime(overlayAt)}` : ''}
-        </p>
+        <div className="ml-auto min-w-0 shrink-0 text-right">
+          <p className="text-xs font-semibold tabular-nums text-slate-700">
+            {formatHourOffset(heatHour)}
+            {overlayAt ? ` ${formatDateTime(overlayAt)}` : ''}
+          </p>
+          {corridorLine && (
+            <p className="mt-0.5 max-w-[28rem] text-[10px] font-medium tabular-nums text-slate-500">
+              {corridorLine}
+            </p>
+          )}
+        </div>
       </div>
 
       <div

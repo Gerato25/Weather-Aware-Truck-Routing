@@ -44,7 +44,7 @@ TARGET_ROUTE_COUNT = 3
 # Two routes are "the same" if they share more than this fraction of their cells.
 MAX_SHARED_FRACTION = 0.72
 # Reject forced detours that balloon the trip beyond this multiple of the best route.
-MAX_DETOUR_RATIO = 1.75
+MAX_DETOUR_RATIO = 1.45
 # Lateral offsets (as a fraction of the straight-line distance) tried when
 # forcing an alternative corridor.
 DETOUR_OFFSETS = (0.18, -0.18, 0.30, -0.30, 0.45, -0.45)
@@ -553,8 +553,6 @@ def plan_trip(
         client, all_coords, latest_eta, request.demo_scenario
     )
     demo_scenario = request.demo_scenario
-    if weather_fallback:
-        demo_scenario = "load_wind"
 
     wind_metric = settings.WIND_RISK_METRIC
     for route in routes:
@@ -593,7 +591,13 @@ def plan_trip(
         "provider": {
             "routing": router.name,
             "truck_profile": getattr(router, "supports_truck_profile", False),
-            "weather": "demo-fallback" if weather_fallback else client.name,
+            "weather": (
+                "demo-fallback"
+                if weather_fallback
+                else "demo"
+                if demo_scenario == "load_wind"
+                else client.name
+            ),
             "wind_metric": wind_metric,
         },
         "routes": [route.as_dict() for route in routes],

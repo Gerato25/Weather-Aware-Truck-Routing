@@ -49,13 +49,6 @@ class DemoScenarioTests(SimpleTestCase):
         self.assertLess(sample.rain_in_hr, 0.05)
         self.assertLess(sample.snow_in_hr, 0.2)
 
-    def test_snow_stays_over_its_area_for_the_full_window(self):
-        snow = self.scenario.storms[2]
-        lat, lon = snow.origin[1], snow.origin[0]
-        for hour in (0.0, 12.0, 24.0, 36.0, 48.0):
-            sample = self.scenario.sample(lat, lon, hour)
-            self.assertGreaterEqual(sample.snow_in_hr, 0.5, msg=f"+{hour:.0f}h")
-
     def test_each_route_gets_a_different_hazard(self):
         rain = self.scenario.storms[1]
         snow = self.scenario.storms[2]

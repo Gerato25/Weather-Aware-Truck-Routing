@@ -1,4 +1,5 @@
-import { RISK_LEVELS } from './risk'
+import type { OverlayMode } from './corridorHeat'
+import { RISK_LEVELS, classifyRain, classifySnow, classifyWind } from './risk'
 import type { CorridorResponse, RiskDisplaySlug } from '../types'
 
 export interface CorridorHourStats {
@@ -90,6 +91,24 @@ export function corridorRiskAt(
   if (!corridor?.points.length || !corridor.risk.length) return null
   const index = nearestCorridorIndex(corridor.points, lon, lat)
   return levelFromScore(corridor.risk[index]?.[hour])
+}
+
+/** Risk at a lat/lon for the slider hour and overlay tab, else the ETA fallback. */
+export function overlayLevelAt(
+  corridor: CorridorResponse | null,
+  lon: number,
+  lat: number,
+  hour: number,
+  mode: OverlayMode,
+  fallback: RiskDisplaySlug,
+): RiskDisplaySlug {
+  if (!corridor || mode === 'off') return fallback
+  const sample = corridorSampleAt(corridor, lon, lat, hour)
+  if (!sample) return fallback
+  if (mode === 'wind') return classifyWind(sample.wind ?? 0)
+  if (mode === 'rain') return classifyRain(sample.rain ?? 0)
+  if (mode === 'snow') return classifySnow(sample.snow ?? 0)
+  return sample.level === 'UNKNOWN' ? fallback : sample.level
 }
 
 /** Forecast values at the corridor sample nearest a checkpoint, for one overlay hour. */
