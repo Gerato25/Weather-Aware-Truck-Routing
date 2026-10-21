@@ -116,7 +116,7 @@ export function PlaceField({
       )}
       {showList && (
         <ul
-          className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-300 bg-white py-1.5 shadow-xl"
           role="listbox"
         >
           {loading && !suggestions.length && (
@@ -136,16 +136,21 @@ export function PlaceField({
             <li key={`${place.lat},${place.lon},${index}`}>
               <button
                 type="button"
-                className={`flex w-full flex-col px-3 py-2 text-left ${
+                className={`grid w-full grid-cols-[1fr_auto] px-3 py-2.5 text-left ${
                   index === activeIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
                 }`}
                 onMouseEnter={() => setHighlighted(index)}
                 onClick={() => choose(place)}
               >
-                <span className="text-sm text-slate-900">{place.label}</span>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-sm font-semibold text-slate-900">{place.label}</span>
+                <span className="col-start-1 text-[11px] text-slate-500">
                   {place.lat.toFixed(3)}, {place.lon.toFixed(3)}
                 </span>
+                {index === activeIndex && (
+                  <span className="col-start-2 row-span-2 self-center rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                    Select
+                  </span>
+                )}
               </button>
             </li>
           ))}

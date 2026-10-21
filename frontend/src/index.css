@@ -930,6 +930,10 @@ button:disabled {
   min-width: 0;
 }
 
+.location-field {
+  z-index: 2;
+}
+
 .field label {
   font-size: 11.5px;
   font-weight: 650;
@@ -1078,47 +1082,76 @@ input[type='range']::-webkit-slider-runnable-track {
 
 .suggestions {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   right: 0;
-  z-index: 40;
+  z-index: 80;
   margin: 0;
-  padding: 4px;
+  padding: 6px;
   list-style: none;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  max-height: 240px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  max-height: 260px;
   overflow-y: auto;
 }
 
 .suggestion {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 7px 9px;
-  border: none;
+  padding: 10px 12px;
+  border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
 }
 
 .suggestion.active,
 .suggestion:hover {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: #eff6ff;
+  border-color: #93c5fd;
 }
 
 .suggestion-label {
-  font-size: 12px;
+  grid-column: 1;
+  font-size: 13.5px;
+  font-weight: 650;
   line-height: 1.35;
+  color: #0f172a;
 }
 
-.suggestion-coords,
-.suggestion-empty {
+.suggestion-coords {
+  grid-column: 1;
   font-size: 11px;
-  color: var(--text-faint);
+  color: #64748b;
+}
+
+.suggestion-pick {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.suggestion.active .suggestion-pick,
+.suggestion:hover .suggestion-pick {
+  display: inline-flex;
+}
+
+.suggestion-empty {
+  font-size: 12px;
+  color: #475569;
 }
 
 .suggestion-empty {
@@ -3287,10 +3320,11 @@ input[type='range']::-webkit-slider-runnable-track {
 
 .home-hero {
   position: relative;
+  z-index: 4;
   isolation: isolate;
   min-height: 430px;
   padding: 28px 0 72px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .home-hero-photo {
@@ -3354,6 +3388,8 @@ input[type='range']::-webkit-slider-runnable-track {
 }
 
 .home-plan-card {
+  position: relative;
+  z-index: 5;
   display: grid;
   grid-template-columns: minmax(150px, 1.15fr) minmax(150px, 1.15fr) minmax(228px, 1.05fr) minmax(118px, 0.62fr) auto;
   gap: 10px 12px;
@@ -3363,6 +3399,7 @@ input[type='range']::-webkit-slider-runnable-track {
   border: 1px solid var(--border);
   border-radius: 24px;
   box-shadow: var(--shadow);
+  overflow: visible;
 }
 
 .home-plan-card .location-resolved {

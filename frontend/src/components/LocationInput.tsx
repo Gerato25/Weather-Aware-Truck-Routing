@@ -143,6 +143,7 @@ export function LocationInput({
                 <span className="suggestion-coords">
                   {place.lat.toFixed(3)}, {place.lon.toFixed(3)}
                 </span>
+                <span className="suggestion-pick">Select</span>
               </button>
             </li>
           ))}
