@@ -55,11 +55,10 @@ def api_exception_handler(exc, context):
 def _weather_client(data: dict) -> OpenMeteoClient:
     """Open-Meteo client seeded with any series the browser fetched itself."""
     prefetch = data.get("open_meteo")
-    if not prefetch:
-        return OpenMeteoClient()
-    return OpenMeteoClient(
-        prefetched=OpenMeteoClient.parse_prefetched(prefetch["points"], prefetch["entries"])
+    prefetched = (
+        OpenMeteoClient.parse_prefetched(prefetch["points"], prefetch["entries"]) if prefetch else None
     )
+    return OpenMeteoClient(prefetched=prefetched, defer=bool(data.get("defer_weather")))
 
 
 def _with_weather_request(payload: dict, client: OpenMeteoClient, demo_scenario: str) -> dict:

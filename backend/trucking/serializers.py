@@ -71,6 +71,9 @@ class OpenMeteoPrefetchSerializer(serializers.Serializer):
 
 class PlanRequestSerializer(serializers.Serializer):
     open_meteo = OpenMeteoPrefetchSerializer(required=False)
+    # Skip the slow keyless fallbacks when Open-Meteo is rate-limited and just
+    # report the points; the browser fetches them and posts them back.
+    defer_weather = serializers.BooleanField(required=False, default=False)
     origin = LocationSerializer()
     destination = LocationSerializer()
     departure = serializers.DateTimeField()
@@ -122,6 +125,7 @@ class DemoStormPointSerializer(serializers.Serializer):
 
 class CorridorRequestSerializer(serializers.Serializer):
     open_meteo = OpenMeteoPrefetchSerializer(required=False)
+    defer_weather = serializers.BooleanField(required=False, default=False)
     seeds = serializers.ListField(child=CoordinateField(), min_length=2, max_length=400)
     load_lb = serializers.FloatField(min_value=0, max_value=MAX_LOAD_LB)
     anchor = serializers.DateTimeField(required=False)

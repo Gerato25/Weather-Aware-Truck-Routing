@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from django.conf import settings
+from django.core.cache import cache
 
 from .geo import (
     Checkpoint,
@@ -234,6 +235,22 @@ def _is_distinct(candidate: RawRoute, existing: list[RawRoute]) -> bool:
         shared_fraction(candidate.coords, route.coords) <= MAX_SHARED_FRACTION
         for route in existing
     )
+
+
+def cached_routes(router, request: TripRequest) -> list[RawRoute]:
+    """``collect_routes`` cached per trip, so re-scoring a plan with browser
+    weather (or analysing the same trip again) skips the router round trips."""
+    o, d = request.origin.coord, request.destination.coord
+    key = (
+        f"routes:{router.name}:{o[0]:.5f},{o[1]:.5f}:{d[0]:.5f},{d[1]:.5f}:"
+        f"{round(request.load_lb)}"
+    )
+    routes = cache.get(key)
+    if routes is None:
+        routes = collect_routes(router, request)
+        if routes:
+            cache.set(key, routes, settings.ROUTE_CACHE_SECONDS)
+    return routes
 
 
 def collect_routes(router, request: TripRequest) -> list[RawRoute]:
@@ -512,14 +529,14 @@ def plan_trip(
     """Run the full pipeline and return the API payload."""
     router = router or get_router()
     try:
-        raw_routes = collect_routes(router, request)
+        raw_routes = cached_routes(router, request)
     except UpstreamError as exc:
         fallback = get_fallback_router()
         if fallback is None:
             raise
         logger.warning("Primary router failed (%s); retrying with %s", exc, fallback.name)
         router = fallback
-        raw_routes = collect_routes(router, request)
+        raw_routes = cached_routes(router, request)
 
     if not raw_routes:
         raise UpstreamError("No route could be found between those locations", provider=router.name)

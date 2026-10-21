@@ -273,8 +273,12 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
                   : plan.provider.weather === 'demo-fallback'
                     ? 'Weather source: Open-Meteo unavailable. Dry placeholders only — not scripted storms.'
                     : `Weather source: ${plan.provider.weather}`}
-              {browserWeather === 'loading' && ' Fetching Open-Meteo from your browser to match a local run…'}
-              {browserWeather === 'failed' && ' Your browser could not reach Open-Meteo either, so the backup forecast stays.'}
+              {browserWeather === 'failed' && ' Your browser could not reach Open-Meteo either, so the backup forecast is used.'}
+            </p>
+          )}
+          {planning && browserWeather === 'loading' && (
+            <p className="mt-2 text-[11px] font-medium text-slate-600" role="status">
+              Fetching live Open-Meteo weather from your browser…
             </p>
           )}
           {plan?.provider.weather === 'demo-fallback' && (

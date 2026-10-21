@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
+from django.core.cache import cache
 from django.test import SimpleTestCase
 
 from trucking.planner import (
@@ -126,6 +127,8 @@ class ShortHorizonWeather:
 
 class AggregationTests(SimpleTestCase):
     def setUp(self):
+        # Fake routers reuse the same trip, so cached routes would leak between tests.
+        cache.clear()
         # A calm southern route and a stormy northern one.
         self.southern = make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 12.0)
         self.northern = make_route((-100.0, 41.0), (-90.0, 41.0), 560.0, 10.0)
@@ -346,6 +349,9 @@ class AggregationTests(SimpleTestCase):
 class RankingTests(SimpleTestCase):
     """Each tier of the preference order decides when the ones above it tie."""
 
+    def setUp(self):
+        cache.clear()
+
     def rank(self, routes, conditions=calm, load_lb=20_000.0):
         payload = plan_trip(
             trip(load_lb=load_lb),
@@ -502,6 +508,9 @@ class RankingTests(SimpleTestCase):
 
 
 class RouteCollectionTests(SimpleTestCase):
+    def setUp(self):
+        cache.clear()
+
     def test_identical_routes_are_deduplicated(self):
         duplicate = make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 12.0)
         near_duplicate = make_route((-100.0, 40.001), (-90.0, 40.001), 601.0, 12.1)

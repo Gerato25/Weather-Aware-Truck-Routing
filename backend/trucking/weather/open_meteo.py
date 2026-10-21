@@ -244,6 +244,10 @@ class PointForecast:
         return j if frac >= 0.5 else i
 
 
+# Open-Meteo's response time barely grows with point count (40 points ~2.1s,
+# 200 ~2.8s), so the browser asks in a few large batches. 150 keeps the URL
+# around 3.5 KB.
+BROWSER_BATCH_SIZE = 150
 _DEFAULT_FALLBACK = object()
 _BLOCKED_KEY = "om:rate-limited"
 # After a 429, skip Open-Meteo for a while instead of burning retries on every
@@ -270,6 +274,7 @@ class OpenMeteoClient:
         base_url: str | None = None,
         fallback=_DEFAULT_FALLBACK,
         prefetched: dict[Coord, PointForecast] | None = None,
+        defer: bool = False,
     ) -> None:
         self.base_url = base_url or settings.OPEN_METEO_BASE_URL
         # Keyless provider used when Open-Meteo answers 429; None disables it.
@@ -277,6 +282,9 @@ class OpenMeteoClient:
         # Open-Meteo series the browser fetched for this request only. They are
         # never written to the shared cache, since the client could alter them.
         self.prefetched = prefetched or {}
+        # When rate-limited, leave points missing (no fallback, no placeholder)
+        # so the response returns fast and the browser can fetch them instead.
+        self.defer = defer
         # Which provider actually served the last ``forecasts`` call.
         self.source = self.name
         # Points Open-Meteo could not serve during this request, and the widest
@@ -329,6 +337,9 @@ class OpenMeteoClient:
                 cache.set(_BLOCKED_KEY, True, backoff)
             remaining = [key for key in missing if key not in results]
             self.unserved.update(remaining)
+            if self.defer:
+                self.source = "deferred"
+                return results
             if self.fallback is None:
                 raise
             try:
@@ -392,7 +403,7 @@ class OpenMeteoClient:
             "url": self.base_url,
             "points": [[lon, lat] for lon, lat in sorted(self.unserved)],
             "params": self._params(self.max_days or 3),
-            "batch_size": settings.WEATHER_BATCH_SIZE,
+            "batch_size": BROWSER_BATCH_SIZE,
         }
 
     @classmethod

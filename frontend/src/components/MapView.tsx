@@ -52,6 +52,10 @@ import type { Checkpoint, CorridorResponse, Place, RiskDisplaySlug, Route } from
 
 import 'maplibre-gl/dist/maplibre-gl.css'
 
+// MapLibre's default font stack (Open Sans) is not on OpenFreeMap's glyph
+// server; Noto Sans is on both it and the CARTO fallback.
+const LABEL_FONT = ['Noto Sans Regular']
+
 const SOURCES = {
   routes: 'routes',
   routeLabels: 'route-labels',
@@ -842,6 +846,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     type: 'symbol',
     source: SOURCES.endpoints,
     layout: {
+      'text-font': LABEL_FONT,
       'text-field': ['get', 'kind'],
       'text-size': 10,
       'text-offset': [0, 1.15],
@@ -880,6 +885,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     type: 'symbol',
     source: SOURCES.truck,
     layout: {
+      'text-font': LABEL_FONT,
       'text-field': ['get', 'label'],
       'text-size': 11,
       'text-offset': [0, 1.35],
@@ -897,6 +903,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     type: 'symbol',
     source: SOURCES.etaLabels,
     layout: {
+      'text-font': LABEL_FONT,
       'text-field': ['get', 'label'],
       'text-size': 11,
       'text-offset': [0, -1.15],
@@ -945,6 +952,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     type: 'symbol',
     source: SOURCES.callouts,
     layout: {
+      'text-font': LABEL_FONT,
       'text-field': ['get', 'label'],
       'text-size': 11,
       'text-anchor': 'bottom',
@@ -1284,6 +1292,14 @@ export function MapView({
       maxCanvasSize: [8192, 8192],
       // Keeps long routes legible instead of wrapping across the antimeridian.
       renderWorldCopies: false,
+      // OpenFreeMap's style and tile index are cached for a day, and the index
+      // names a dated tile set that is later retired. A stale copy makes every
+      // tile 404, which MapLibre treats as empty: a blank basemap with no error.
+      // Revalidating keeps the index current.
+      transformRequest: (url, resourceType) =>
+        (resourceType === 'Style' || resourceType === 'Source') && url.includes('openfreemap.org')
+          ? { url, cache: 'no-cache' }
+          : { url },
     })
 
     const resize = () => map.resize()
@@ -1340,6 +1356,15 @@ export function MapView({
     const styleTimer = window.setTimeout(() => {
       if (!map.isStyleLoaded()) switchToFallbackBasemap()
     }, 12_000)
+    // Missing tiles raise no error (see transformRequest), so also check that
+    // the basemap actually drew something once the first view has settled.
+    map.once('idle', () => {
+      if (basemapFallbackRef.current || !map.getSource('openmaptiles')) return
+      const empty = ['water', 'landcover', 'place', 'transportation', 'boundary'].every(
+        (sourceLayer) => map.querySourceFeatures('openmaptiles', { sourceLayer }).length === 0,
+      )
+      if (empty) switchToFallbackBasemap()
+    })
 
     map.on('error', (event) => {
       const message = event.error?.message ?? 'The map failed to load'

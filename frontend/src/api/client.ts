@@ -98,6 +98,7 @@ export interface PlanPayload {
   interval_miles: number
   demo_scenario?: '' | 'load_wind'
   open_meteo?: OpenMeteoPrefetch
+  defer_weather?: boolean
 }
 
 // Open-Meteo's free tier rejects overlapping requests from one IP, and the
@@ -156,6 +157,7 @@ export function fetchCorridor(
     demo_scenario?: '' | 'load_wind'
     route_lines?: [number, number][][]
     open_meteo?: OpenMeteoPrefetch
+    defer_weather?: boolean
   },
   signal?: AbortSignal,
 ): Promise<CorridorResponse> {

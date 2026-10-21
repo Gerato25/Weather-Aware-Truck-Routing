@@ -228,3 +228,27 @@ class BrowserPrefetchTests(SimpleTestCase):
         with mock.patch("trucking.weather.open_meteo.request_json", return_value=_series()) as request:
             OpenMeteoClient(fallback=None).forecasts([point], forecast_days=2)
         request.assert_called_once()
+
+    def test_deferred_client_skips_fallbacks_and_reports_points(self):
+        busy = UpstreamError(
+            "Open-Meteo returned 429: Daily API request limit exceeded.",
+            provider="Open-Meteo",
+            status=429,
+        )
+        fallback = mock.Mock()
+        fallback.name = "nws"
+        client = OpenMeteoClient(fallback=fallback, defer=True)
+        with mock.patch("trucking.weather.open_meteo.request_json", side_effect=busy):
+            result = client.forecasts([(-118.24, 34.05)], forecast_days=2)
+        self.assertEqual(result, {})
+        fallback.forecasts.assert_not_called()
+        self.assertEqual(len(client.browser_request()["points"]), 1)
+
+    def test_browser_weather_gets_its_own_raster(self):
+        from trucking.corridor import CorridorRequest
+        from trucking.weather.raster import _cache_id
+
+        request = CorridorRequest(
+            seeds=[(-118.2, 34.0), (-122.4, 37.8)], load_lb=42000, anchor=datetime.now(timezone.utc)
+        )
+        self.assertNotEqual(_cache_id(request, 48, "server"), _cache_id(request, 48, "browser"))

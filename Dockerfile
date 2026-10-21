@@ -34,4 +34,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
     CMD curl -fsS "http://127.0.0.1:${PORT}/api/health/" >/dev/null || exit 1
 
-CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 120"]
+# One process: the weather raster PNGs, forecast/route caches and the Open-Meteo
+# rate-limit flag all live in process memory, so a second worker would miss them
+# (the PNG requests 404'd). Threads still serve requests concurrently.
+CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 120"]

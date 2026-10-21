@@ -196,7 +196,7 @@ class WeatherMapEndpointTests(SimpleTestCase):
         self.assertEqual(response.status_code, 400)
 
 
-class GeocodeEndpointTests(SimpleTestCase):
+class GeocodeFallbackTests(SimpleTestCase):
     def setUp(self):
         from django.core.cache import cache
 

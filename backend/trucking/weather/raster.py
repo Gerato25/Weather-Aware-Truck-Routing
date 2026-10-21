@@ -24,7 +24,7 @@ from django.conf import settings
 from PIL import Image, ImageFilter
 
 from ..corridor import CorridorRequest
-from ..geo import Coord, haversine_m, meters_to_miles
+from ..geo import Coord
 from ..risk import assess
 from .open_meteo import OpenMeteoClient, PointForecast, forecasts_for_request, snap
 from .storms import build_demo_scenario
@@ -80,13 +80,26 @@ def _thin(line: list[Coord], max_points: int = 56) -> list[Coord]:
 
 
 def _min_miles(point: Coord, lines: list[list[Coord]]) -> float:
-    best = 1e9
+    """Distance in miles to the nearest route vertex.
+
+    A flat-earth approximation is plenty within the ~50 mile fade band and is
+    several times cheaper than haversine across the 72×44 grid. Stops early
+    once inside the fully opaque band, where the exact figure no longer matters.
+    """
+    lon, lat = point
+    kx = 69.17 * math.cos(math.radians(lat))
+    best_sq = 1e18
+    inner_sq = FADE_INNER_MILES * FADE_INNER_MILES
     for line in lines:
-        for coord in line:
-            dist = meters_to_miles(haversine_m(point, coord))
-            if dist < best:
-                best = dist
-    return best
+        for clon, clat in line:
+            dx = (clon - lon) * kx
+            dy = (clat - lat) * 69.0
+            d = dx * dx + dy * dy
+            if d < best_sq:
+                best_sq = d
+                if d <= inner_sq:
+                    return math.sqrt(d)
+    return math.sqrt(best_sq)
 
 
 def _lerp(a: float, b: float, t: float) -> float:
@@ -255,8 +268,11 @@ _LOCK = Lock()
 _CACHE: dict[str, RasterSet] = {}
 
 
-def _cache_id(request: CorridorRequest, hours: int) -> str:
+def _cache_id(request: CorridorRequest, hours: int, weather_tag: str = "") -> str:
     payload = {
+        # Browser-supplied Open-Meteo must not reuse a raster built from a
+        # fallback (or deferred, empty) forecast for the same corridor.
+        "weather": weather_tag,
         "seeds": [[round(lon, 4), round(lat, 4)] for lon, lat in request.seeds[:80]],
         "load": round(request.load_lb, 1),
         "hours": hours,
@@ -298,7 +314,8 @@ def build_and_cache_rasters(
     forecasts: dict[Coord, PointForecast] | None = None,
 ) -> RasterSet:
     hours = len(timestamps)
-    cache_id = _cache_id(request, hours)
+    weather_tag = "browser" if getattr(weather_client, "prefetched", None) else "server"
+    cache_id = _cache_id(request, hours, weather_tag)
     with _LOCK:
         existing = _CACHE.get(cache_id)
         if existing is not None:
@@ -340,6 +357,20 @@ def build_and_cache_rasters(
     rain = [[[0.0] * cols for _ in range(rows)] for _ in range(hours)]
     snow = [[[0.0] * cols for _ in range(rows)] for _ in range(hours)]
 
+    def scored(sample) -> tuple[float, float, float, float]:
+        result = assess(sample, request.load_lb, wind_metric)
+        used = sample.effective_wind(wind_metric)
+        return (
+            float(result.score) if result.available else 0.0,
+            0.0 if used is None else float(used),
+            0.0 if sample.rain_in_hr is None else float(sample.rain_in_hr),
+            0.0 if sample.snow_in_hr is None else float(sample.snow_in_hr),
+        )
+
+    # Many cells share a nearest forecast, so each one is scored once per hour.
+    per_forecast: dict[int, list[tuple[float, float, float, float] | None]] = {}
+    stamps = [ts.timestamp() for ts in timestamps]
+
     for r, y in enumerate(ys):
         for c, x in enumerate(xs):
             index = r * cols + c
@@ -347,21 +378,20 @@ def build_and_cache_rasters(
             fade[r][c] = edge
             if edge <= 0:
                 continue
-            point = points[index]
-            forecast = None if scenario else _nearest_forecast(point, live)
-            for hour, ts in enumerate(timestamps):
-                if scenario is not None:
-                    sample = scenario.sample(y, x, float(hour))
-                elif forecast is None or not forecast.times:
+            if scenario is not None:
+                series = [scored(scenario.sample(y, x, float(hour))) for hour in range(hours)]
+            else:
+                forecast = _nearest_forecast(points[index], live)
+                if forecast is None or not forecast.times:
                     continue
-                else:
-                    sample = forecast.sample_at(ts.timestamp())
-                result = assess(sample, request.load_lb, wind_metric)
-                risk[hour][r][c] = float(result.score) if result.available else 0.0
-                used = sample.effective_wind(wind_metric)
-                wind[hour][r][c] = 0.0 if used is None else float(used)
-                rain[hour][r][c] = 0.0 if sample.rain_in_hr is None else float(sample.rain_in_hr)
-                snow[hour][r][c] = 0.0 if sample.snow_in_hr is None else float(sample.snow_in_hr)
+                series = per_forecast.get(id(forecast))
+                if series is None:
+                    series = [scored(forecast.sample_at(ts)) for ts in stamps]
+                    per_forecast[id(forecast)] = series
+            for hour, values in enumerate(series):
+                if values is None:
+                    continue
+                risk[hour][r][c], wind[hour][r][c], rain[hour][r][c], snow[hour][r][c] = values
 
     bundle = RasterSet(
         cache_id=cache_id,
