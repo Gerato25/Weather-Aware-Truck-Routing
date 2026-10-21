@@ -21,12 +21,11 @@ type RouteFilter = 'recommended' | 'all' | 'compare'
 
 interface RoutesPageProps {
   theme: Theme
-  onTheme: (theme: Theme) => void
   onNavigate: (page: Page) => void
   session: Session
 }
 
-export function RoutesPage({ theme, onTheme, onNavigate, session }: RoutesPageProps) {
+export function RoutesPage({ theme, onNavigate, session }: RoutesPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [filter, setFilter] = useState<RouteFilter>('recommended')
   const [basemap, setBasemap] = useState<'map' | 'satellite'>('map')
@@ -55,8 +54,6 @@ export function RoutesPage({ theme, onTheme, onNavigate, session }: RoutesPagePr
 
       <div className="workspace-main">
         <WorkspaceBar
-          theme={theme}
-          onTheme={onTheme}
           title="Route Results"
           action={
             <button type="button" className="ghost edit-trip" onClick={() => onNavigate('planner')}>
@@ -171,8 +168,6 @@ export function RoutesPage({ theme, onTheme, onNavigate, session }: RoutesPagePr
         {settingsOpen && (
           <aside className="settings-drawer">
             <SettingsPanel
-              theme={theme}
-              onTheme={onTheme}
               intervalMiles={form.intervalMiles}
               onInterval={(value) => updateField('intervalMiles', value)}
               routing={plan?.provider.routing}

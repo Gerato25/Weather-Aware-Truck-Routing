@@ -9,7 +9,7 @@ import type { TripFormValues } from './types'
 
 export default function App() {
   const session = useTripSession()
-  const { theme, setTheme } = useTheme()
+  const { theme } = useTheme()
   const { page, go } = usePage()
 
   const startTrip = useCallback(
@@ -24,8 +24,6 @@ export default function App() {
   if (page === 'home') {
     return (
       <HomePage
-        theme={theme}
-        onTheme={setTheme}
         form={session.form}
         onFormChange={session.updateField}
         onNavigate={go}
@@ -38,7 +36,6 @@ export default function App() {
     <DashboardPage
       session={session}
       theme={theme}
-      onTheme={setTheme}
       onNavigate={go}
     />
   )

@@ -3,10 +3,10 @@ import type { TripFormValues } from '../types'
 
 /** I-5 / CA-99 / US-101. Leave this evening so the 7h haul crosses live SoCal rain. */
 export const INITIAL_FORM: TripFormValues = {
-  origin: 'Los Angeles, CA',
-  destination: 'San Francisco, CA',
-  originPlace: { label: 'Los Angeles, CA', lat: 34.0522, lon: -118.2437 },
-  destinationPlace: { label: 'San Francisco, CA', lat: 37.7749, lon: -122.4194 },
+  origin: '',
+  destination: '',
+  originPlace: null,
+  destinationPlace: null,
   departure: toLocalInputValue(hoursFromNow(18)),
   loadLb: 42_000,
   intervalMiles: 25,

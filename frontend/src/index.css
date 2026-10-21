@@ -3569,7 +3569,6 @@ input[type='range']::-webkit-slider-runnable-track {
 }
 
 #features,
-#about,
 #top,
 #route-options {
   scroll-margin-top: 72px;

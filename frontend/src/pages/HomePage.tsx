@@ -1,16 +1,10 @@
-import { useEffect } from 'react'
-
 import { formatPounds } from '../lib/format'
 import { AppHeader } from '../components/AppHeader'
-import { HomeMapPreview } from '../components/HomeMapPreview'
 import { LocationInput } from '../components/LocationInput'
 import type { Page } from '../lib/navigation'
-import type { Theme } from '../lib/theme'
 import type { Place, TripFormValues } from '../types'
 
 interface HomePageProps {
-  theme: Theme
-  onTheme: (theme: Theme) => void
   form: TripFormValues
   onFormChange: <K extends keyof TripFormValues>(key: K, value: TripFormValues[K]) => void
   onNavigate: (page: Page, hash?: string) => void
@@ -44,28 +38,7 @@ const FEATURES = [
   },
 ] as const
 
-const STEPS = [
-  {
-    title: 'Enter Trip Details',
-    body: 'Add origin, destination, departure time and load weight.',
-  },
-  {
-    title: 'Get 3 Route Options',
-    body: 'We’ll find alternative routes using a routing API.',
-  },
-  {
-    title: 'Check Weather & Risk',
-    body: 'Sample weather along the route and calculate risk levels.',
-  },
-  {
-    title: 'See the Best Route',
-    body: 'Compare routes and get the safest recommendation.',
-  },
-]
-
 export function HomePage({
-  theme,
-  onTheme,
   form,
   onFormChange,
   onNavigate,
@@ -73,14 +46,9 @@ export function HomePage({
 }: HomePageProps) {
   const canSubmit = form.origin.trim().length > 1 && form.destination.trim().length > 1
 
-  useEffect(() => {
-    if (window.location.hash !== '#about') return
-    document.getElementById('about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [])
-
   return (
     <div className="app home-shell">
-      <AppHeader page="home" theme={theme} onTheme={onTheme} onNavigate={onNavigate} />
+      <AppHeader page="home" onNavigate={onNavigate} />
 
       <section className="home-hero" id="top">
         <img
@@ -190,25 +158,6 @@ export function HomePage({
               </div>
             </article>
           ))}
-        </section>
-
-        <section className="home-how" id="about">
-          <div className="home-how-copy">
-            <h3>How It Works</h3>
-            <p>Plan your trip in a few simple steps and get the safest route with weather-aware insights.</p>
-            <ol>
-              {STEPS.map((step, index) => (
-                <li key={step.title}>
-                  <span>{index + 1}</span>
-                  <div>
-                    <strong>{step.title}</strong>
-                    <p>{step.body}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-          <HomeMapPreview theme={theme} />
         </section>
       </div>
 

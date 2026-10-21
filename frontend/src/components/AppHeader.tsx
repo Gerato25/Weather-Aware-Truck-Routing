@@ -1,19 +1,14 @@
 import type { Page } from '../lib/navigation'
 import { pathForPage } from '../lib/navigation'
-import type { Theme } from '../lib/theme'
 import { weatherGlyph, weatherLabel } from '../lib/format'
-
-import { ThemeToggle } from './ThemeToggle'
 
 interface AppHeaderProps {
   page: Page
-  theme: Theme
-  onTheme: (theme: Theme) => void
   onNavigate: (page: Page, hash?: string) => void
   originWeather?: { temperature_f: number | null; weather_code: number | null } | null
 }
 
-export function AppHeader({ page, theme, onTheme, onNavigate, originWeather }: AppHeaderProps) {
+export function AppHeader({ page, onNavigate, originWeather }: AppHeaderProps) {
   return (
     <header className="topbar">
       <a
@@ -64,21 +59,10 @@ export function AppHeader({ page, theme, onTheme, onNavigate, originWeather }: A
         >
           Trip Planner
         </a>
-        <a
-          href="/#about"
-          className="top-nav-link"
-          onClick={(event) => {
-            if (event.metaKey || event.ctrlKey || event.button !== 0) return
-            event.preventDefault()
-            onNavigate('home', '#about')
-          }}
-        >
-          About
-        </a>
       </nav>
 
-      <div className="header-actions">
-        {originWeather && (
+      {originWeather && (
+        <div className="header-actions">
           <div className="wx-chip">
             <span aria-hidden="true">{weatherGlyph(originWeather.weather_code)}</span>
             <strong>
@@ -88,9 +72,8 @@ export function AppHeader({ page, theme, onTheme, onNavigate, originWeather }: A
             </strong>
             <small>{weatherLabel(originWeather.weather_code)}</small>
           </div>
-        )}
-        <ThemeToggle theme={theme} onChange={onTheme} />
-      </div>
+        </div>
+      )}
     </header>
   )
 }

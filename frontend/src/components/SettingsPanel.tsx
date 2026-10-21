@@ -1,11 +1,6 @@
-import type { Theme } from '../lib/theme'
 import type { TripFormValues } from '../types'
 
-import { ThemeToggle } from './ThemeToggle'
-
 interface SettingsPanelProps {
-  theme: Theme
-  onTheme: (theme: Theme) => void
   intervalMiles: TripFormValues['intervalMiles']
   onInterval: (value: TripFormValues['intervalMiles']) => void
   routing?: string
@@ -16,8 +11,6 @@ interface SettingsPanelProps {
 const INTERVALS: TripFormValues['intervalMiles'][] = [10, 25, 50]
 
 export function SettingsPanel({
-  theme,
-  onTheme,
   intervalMiles,
   onInterval,
   routing,
@@ -29,11 +22,6 @@ export function SettingsPanel({
       <header className="panel-head">
         <h2>Settings</h2>
       </header>
-
-      <div className="setting-block">
-        <span>Theme</span>
-        <ThemeToggle theme={theme} onChange={onTheme} />
-      </div>
 
       <div className="setting-block">
         <span>Checkpoint spacing</span>

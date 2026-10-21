@@ -31,7 +31,6 @@ type Session = ReturnType<typeof useTripSession>
 interface DashboardPageProps {
   session: Session
   theme: Theme
-  onTheme: (theme: Theme) => void
   onNavigate: (page: Page, hash?: string) => void
 }
 
@@ -99,7 +98,7 @@ function pickWeatherRegion(
   return null
 }
 
-export function DashboardPage({ session, theme, onTheme, onNavigate }: DashboardPageProps) {
+export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps) {
   const {
     form,
     updateField,
@@ -238,7 +237,7 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
 
   return (
     <div className="dash-app min-h-screen">
-      <AppHeader page="planner" theme={theme} onTheme={onTheme} onNavigate={onNavigate} />
+      <AppHeader page="planner" onNavigate={onNavigate} />
 
       <main className={`${SHELL} flex flex-col gap-3 py-3`}>
         <form

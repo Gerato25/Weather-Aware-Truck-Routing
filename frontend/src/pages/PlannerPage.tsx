@@ -21,12 +21,11 @@ type Session = ReturnType<typeof useTripSession>
 
 interface PlannerPageProps {
   theme: Theme
-  onTheme: (theme: Theme) => void
   onNavigate: (page: Page, hash?: string) => void
   session: Session
 }
 
-export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPageProps) {
+export function PlannerPage({ theme, onNavigate, session }: PlannerPageProps) {
   const {
     form,
     updateField,
@@ -52,13 +51,7 @@ export function PlannerPage({ theme, onTheme, onNavigate, session }: PlannerPage
 
   return (
     <div className="app">
-      <AppHeader
-        page="planner"
-        theme={theme}
-        onTheme={onTheme}
-        onNavigate={onNavigate}
-        originWeather={originWx}
-      />
+      <AppHeader page="planner" onNavigate={onNavigate} originWeather={originWx} />
 
       <section className="composer">
         <TripForm values={form} loading={planning} onChange={updateField} onSubmit={() => void runPlan(form)} />

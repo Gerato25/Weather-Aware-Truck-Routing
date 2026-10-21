@@ -1,23 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { applyTheme, readStoredTheme, type Theme } from '../lib/theme'
+import { applyTheme, type Theme } from '../lib/theme'
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(() =>
-    typeof document === 'undefined' ? 'light' : readStoredTheme(),
-  )
+  const [theme] = useState<Theme>('light')
 
   useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
-
-  const setTheme = useCallback((next: Theme) => {
-    setThemeState(next)
+    applyTheme('light')
   }, [])
 
-  const toggle = useCallback(() => {
-    setThemeState((current) => (current === 'dark' ? 'light' : 'dark'))
-  }, [])
-
-  return { theme, setTheme, toggle }
+  return { theme }
 }

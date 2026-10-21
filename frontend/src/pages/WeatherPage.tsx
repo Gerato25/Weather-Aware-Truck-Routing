@@ -19,12 +19,11 @@ type Session = ReturnType<typeof useTripSession>
 
 interface WeatherPageProps {
   theme: Theme
-  onTheme: (theme: Theme) => void
   onNavigate: (page: Page) => void
   session: Session
 }
 
-export function WeatherPage({ theme, onTheme, onNavigate, session }: WeatherPageProps) {
+export function WeatherPage({ theme, onNavigate, session }: WeatherPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const {
     form,
@@ -55,8 +54,6 @@ export function WeatherPage({ theme, onTheme, onNavigate, session }: WeatherPage
 
       <div className="workspace-main">
         <WorkspaceBar
-          theme={theme}
-          onTheme={onTheme}
           subtitle="Weather conditions along your route and at each checkpoint."
           action={
             plan ? (
@@ -146,8 +143,6 @@ export function WeatherPage({ theme, onTheme, onNavigate, session }: WeatherPage
         {settingsOpen && (
           <aside className="settings-drawer">
             <SettingsPanel
-              theme={theme}
-              onTheme={onTheme}
               intervalMiles={form.intervalMiles}
               onInterval={(value) => updateField('intervalMiles', value)}
               routing={plan?.provider.routing}
