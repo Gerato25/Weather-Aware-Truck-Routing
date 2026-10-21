@@ -194,3 +194,46 @@ class WeatherMapEndpointTests(SimpleTestCase):
     def test_point_rejects_out_of_range(self):
         response = self.client.get("/api/weather/point/?lat=200&lon=-87")
         self.assertEqual(response.status_code, 400)
+
+
+class GeocodeEndpointTests(SimpleTestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+
+    def test_rate_limited_geocoder_is_not_blamed_on_open_meteo(self):
+        error = UpstreamError("Nominatim returned 429: slow down", provider="Nominatim", status=429)
+        with mock.patch("trucking.views.get_geocoder") as geocoder:
+            geocoder.return_value.search.side_effect = error
+            response = self.client.get("/api/geocode/?q=Los+Angeles")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["provider"], "Nominatim")
+        self.assertNotIn("Open-Meteo", response.json()["detail"])
+
+    def test_chain_falls_back_and_caches_results(self):
+        from trucking.providers.geocoding import ChainedGeocoder
+
+        failing = mock.Mock(name="photon")
+        failing.name = "photon"
+        failing.search.side_effect = UpstreamError("down", provider="Photon", status=429)
+        working = mock.Mock()
+        working.name = "nominatim"
+        working.search.return_value = [Place(label="Los Angeles", lat=34.05, lon=-118.24)]
+        chain = ChainedGeocoder([failing, working])
+
+        first = chain.search("Los  Angeles", 5)
+        second = chain.search("los angeles", 5)
+
+        self.assertEqual(first, second)
+        self.assertEqual(working.search.call_count, 1)
+
+    def test_photon_label_skips_repeated_parts(self):
+        from trucking.providers.geocoding import _photon_label
+
+        label = _photon_label(
+            {"name": "Los Angeles", "county": "Los Angeles", "state": "California",
+             "country": "United States"},
+            "Los Angele",
+        )
+        self.assertEqual(label, "Los Angeles, California, United States")

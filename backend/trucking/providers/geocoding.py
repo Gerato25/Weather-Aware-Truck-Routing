@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from django.conf import settings
+from django.core.cache import cache
 
 from ..http import UpstreamError, request_json
 from .base import Place
@@ -61,6 +63,58 @@ class NominatimGeocoder:
         return places
 
 
+class PhotonGeocoder:
+    """Komoot's hosted Photon: keyless OSM search built for type-ahead.
+
+    Nominatim's policy forbids autocomplete and throttles shared cloud IPs such
+    as Render's, so Photon is the keyless default and Nominatim the fallback.
+    """
+
+    name = "photon"
+
+    def __init__(self, base_url: str | None = None) -> None:
+        self.base_url = (base_url or settings.PHOTON_BASE_URL).rstrip("/")
+
+    def search(self, query: str, limit: int = 5) -> list[Place]:
+        payload = request_json(
+            "GET",
+            f"{self.base_url}/api/",
+            provider="Photon",
+            params={"q": query, "limit": str(limit), "lang": "en"},
+        )
+        places = []
+        for feature in (payload or {}).get("features") or []:
+            coords = (feature.get("geometry") or {}).get("coordinates") or []
+            if len(coords) != 2:
+                continue
+            places.append(
+                Place(
+                    label=_photon_label(feature.get("properties") or {}, query),
+                    lat=float(coords[1]),
+                    lon=float(coords[0]),
+                )
+            )
+        return places
+
+
+def _photon_label(properties: dict, query: str) -> str:
+    """Build "Name, City, State, Country" without repeating a part."""
+    street = " ".join(
+        str(part) for part in (properties.get("housenumber"), properties.get("street")) if part
+    )
+    parts: list[str] = []
+    for part in (
+        properties.get("name") or street,
+        properties.get("city"),
+        properties.get("county"),
+        properties.get("state"),
+        properties.get("country"),
+    ):
+        if part and part not in parts:
+            parts.append(str(part))
+    return ", ".join(parts) or query
+
+
 class PeliasGeocoder:
     """OpenRouteService's hosted Pelias - better autocomplete, needs the key."""
 
@@ -108,6 +162,15 @@ class ChainedGeocoder:
         if direct:
             return [direct]
 
+        # Autocomplete repeats the same prefixes, so cache hits spare the
+        # rate-limited upstreams.
+        normalized = " ".join(query.lower().split())
+        digest = hashlib.sha1(normalized.encode()).hexdigest()
+        cache_key = f"geo:{self.name}:{limit}:{digest}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         last_error: UpstreamError | None = None
         for geocoder in self.geocoders:
             try:
@@ -116,6 +179,7 @@ class ChainedGeocoder:
                 last_error = exc
                 continue
             if results:
+                cache.set(cache_key, results, settings.GEOCODE_CACHE_SECONDS)
                 return results
         if last_error:
             raise last_error

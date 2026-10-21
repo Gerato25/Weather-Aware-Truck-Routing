@@ -7,7 +7,7 @@ import logging
 from django.conf import settings
 
 from ..http import UpstreamError
-from .geocoding import ChainedGeocoder, NominatimGeocoder, PeliasGeocoder
+from .geocoding import ChainedGeocoder, NominatimGeocoder, PeliasGeocoder, PhotonGeocoder
 from .ors import OpenRouteServiceProvider
 from .osrm import OSRMProvider
 
@@ -38,5 +38,6 @@ def get_geocoder():
             geocoders.append(PeliasGeocoder())
         except UpstreamError:
             pass
+    geocoders.append(PhotonGeocoder())
     geocoders.append(NominatimGeocoder())
     return ChainedGeocoder(geocoders)

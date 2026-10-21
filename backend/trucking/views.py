@@ -34,11 +34,16 @@ def api_exception_handler(exc, context):
     if isinstance(exc, UpstreamError):
         logger.warning("Upstream failure from %s: %s", exc.provider or "?", exc)
         detail = str(exc)
-        if exc.status == 429 or ("limit" in detail.lower() and "exceeded" in detail.lower()):
+        rate_limited = exc.status == 429 or (
+            "limit" in detail.lower() and "exceeded" in detail.lower()
+        )
+        if rate_limited and exc.provider == "Open-Meteo":
             detail = (
                 "Open-Meteo daily limit exceeded. Check Demo weather and Analyze — "
                 "local storms will run until the quota resets."
             )
+        elif rate_limited:
+            detail = f"{exc.provider or 'An upstream service'} is rate-limiting requests. Try again shortly."
         return Response(
             {"detail": detail, "provider": exc.provider},
             status=status.HTTP_502_BAD_GATEWAY,
