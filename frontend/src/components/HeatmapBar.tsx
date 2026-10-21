@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 
+import { formatEtaClock } from '../lib/format'
 import type { CorridorResponse } from '../types'
 
 interface HeatmapBarProps {
@@ -45,7 +46,7 @@ export function HeatmapBar({ corridor, loading = false, hour, onHourChange }: He
           {loading
             ? 'Loading…'
             : timestamp
-              ? timestamp.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' })
+              ? formatEtaClock(timestamp.toISOString())
               : '—'}
         </span>
       </div>

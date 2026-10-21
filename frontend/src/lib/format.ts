@@ -1,5 +1,34 @@
 /** Display formatting helpers. All API timestamps are ISO 8601 with an offset. */
 
+/** Haul clocks (LA–SF) stay on U.S. Pacific, not the viewer's local zone. */
+export const DISPLAY_TIME_ZONE = 'America/Los_Angeles'
+
+function formatInDisplayZone(iso: string, options: Intl.DateTimeFormatOptions): string {
+  return new Date(iso).toLocaleString('en-US', { ...options, timeZone: DISPLAY_TIME_ZONE })
+}
+
+function zoneParts(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: DISPLAY_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  const hour = get('hour')
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: hour === '24' ? '00' : hour,
+    minute: get('minute'),
+  }
+}
+
 export function formatDuration(hours: number): string {
   if (!Number.isFinite(hours)) return '-'
   const whole = Math.floor(hours)
@@ -10,7 +39,7 @@ export function formatDuration(hours: number): string {
 
 export function formatClock(iso: string | null): string {
   if (!iso) return '-'
-  return new Date(iso).toLocaleString(undefined, {
+  return formatInDisplayZone(iso, {
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
@@ -20,7 +49,7 @@ export function formatClock(iso: string | null): string {
 
 export function formatEta(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
+  return formatInDisplayZone(iso, {
     hour: 'numeric',
     minute: '2-digit',
     timeZoneName: 'short',
@@ -30,7 +59,7 @@ export function formatEta(iso: string | null): string {
 /** Clock time without the zone, for tight tables that put the zone in the header. */
 export function formatEtaClock(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
+  return formatInDisplayZone(iso, {
     hour: 'numeric',
     minute: '2-digit',
   })
@@ -39,7 +68,10 @@ export function formatEtaClock(iso: string | null): string {
 export function formatTimeZoneShort(iso?: string | null): string {
   const stamp = iso ? new Date(iso) : new Date()
   if (Number.isNaN(stamp.getTime())) return ''
-  const part = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+  const part = new Intl.DateTimeFormat('en-US', {
+    timeZone: DISPLAY_TIME_ZONE,
+    timeZoneName: 'short',
+  })
     .formatToParts(stamp)
     .find((item) => item.type === 'timeZoneName')
   return part?.value ?? ''
@@ -64,7 +96,7 @@ export function formatEtaRelative(iso: string | null, fromIso?: string | null): 
 
 export function formatDateTime(iso: string | null): string {
   if (!iso) return '-'
-  return new Date(iso).toLocaleString(undefined, {
+  return formatInDisplayZone(iso, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -76,7 +108,7 @@ export function formatDateTime(iso: string | null): string {
 /** Full arrival/forecast stamp with timezone, used on checkpoint details. */
 export function formatForecastStamp(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
+  return formatInDisplayZone(iso, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -117,15 +149,31 @@ export function compassFromDeg(degrees: number | null | undefined): string | nul
   return COMPASS[Math.round(wrapped / 45) % 8]
 }
 
-/** Value for a `datetime-local` input, which has no timezone and needs minutes. */
+/** Value for a `datetime-local` input, as U.S. Pacific wall time. */
 export function toLocalInputValue(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+  const parts = zoneParts(date)
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour.padStart(2, '0')}:${parts.minute}`
 }
 
-/** Converts a `datetime-local` value into an absolute ISO instant. */
+/** Treats a `datetime-local` value as U.S. Pacific and returns an ISO instant. */
 export function fromLocalInputValue(value: string): string {
-  return new Date(value).toISOString()
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value)
+  if (!match) return new Date(value).toISOString()
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute)
+  const shown = zoneParts(new Date(utcGuess))
+  const asUtc = Date.UTC(
+    Number(shown.year),
+    Number(shown.month) - 1,
+    Number(shown.day),
+    Number(shown.hour),
+    Number(shown.minute),
+  )
+  return new Date(utcGuess - (asUtc - utcGuess)).toISOString()
 }
 
 export function hoursFromNow(offset: number): Date {

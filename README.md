@@ -37,7 +37,7 @@ On **Trip Planner**:
 - Load (lb)
 - Checkpoint spacing: **10**, **25**, or **50** miles
 
-Autocomplete geocodes to lat/lon. Risk uses those coordinates and the ETA at each stop.
+Autocomplete geocodes to lat/lon. Risk uses those coordinates and the ETA at each stop. Clocks (departure, ETA, slider) are shown in **U.S. Pacific** (`America/Los_Angeles`), not the viewer’s local zone.
 
 ---
 
