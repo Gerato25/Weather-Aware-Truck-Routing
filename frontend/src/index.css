@@ -3333,6 +3333,26 @@ input[type='range']::-webkit-slider-runnable-track {
   color: var(--text-dim);
 }
 
+.home-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-proof li {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
 .home-plan-card {
   display: grid;
   grid-template-columns: minmax(150px, 1.15fr) minmax(150px, 1.15fr) minmax(228px, 1.05fr) minmax(118px, 0.62fr) auto;
@@ -3490,6 +3510,204 @@ input[type='range']::-webkit-slider-runnable-track {
   font-size: 14px;
 }
 
+.home-result-card {
+  padding: 22px 22px 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.home-result-kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.home-result-title {
+  margin: 6px 0 16px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.home-result-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-result-card li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.home-result-card i {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.home-result-card li strong {
+  display: block;
+  font-size: 14px;
+}
+
+.home-result-card li span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.home-result-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.home-rules {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.7fr);
+  gap: 18px;
+  padding: 8px 0 48px;
+}
+
+.home-rules-card {
+  padding: 22px 22px 20px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.home-rules-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.home-rules-head h3 {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.home-rules-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.home-rules-table-wrap {
+  overflow-x: auto;
+}
+
+.home-rules table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.home-rules th,
+.home-rules td {
+  padding: 9px 8px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.home-rules thead th {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.home-rules thead th:first-child {
+  text-align: left;
+  background: #f1f5f9;
+  border-radius: 10px 0 0 0;
+}
+
+.home-rules thead th[data-level='LOW'] {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.home-rules thead th[data-level='MODERATE'] {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.home-rules thead th[data-level='HIGH'] {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.home-rules thead th[data-level='SEVERE'] {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.home-rules thead th[data-level='NO_TRAVEL'] {
+  background: #fecaca;
+  color: #7f1d1d;
+  border-radius: 0 10px 0 0;
+}
+
+.home-rules tbody th {
+  text-align: left;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.home-rules tbody th small {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.home-rules tbody tr:last-child th,
+.home-rules tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.home-load-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-load-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.home-load-list svg {
+  margin-top: 2px;
+  color: #16a34a;
+}
+
 .home-map-preview {
   position: relative;
   height: 280px;
@@ -3589,6 +3807,8 @@ input[type='range']::-webkit-slider-runnable-track {
 
 #features,
 #top,
+#how,
+#rules,
 #route-options {
   scroll-margin-top: 72px;
 }
@@ -3637,7 +3857,8 @@ input[type='range']::-webkit-slider-runnable-track {
   .home-plan-meta,
   .home-features,
   .home-how,
-  .home-how ol {
+  .home-how ol,
+  .home-rules {
     grid-template-columns: 1fr;
   }
 

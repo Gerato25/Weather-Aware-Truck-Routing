@@ -1,8 +1,42 @@
+import { CheckCircle2, Shield, Truck } from 'lucide-react'
+
 import { formatPounds } from '../lib/format'
 import { AppHeader } from '../components/AppHeader'
 import { LocationInput } from '../components/LocationInput'
+import { RISK_LABELS, RISK_LEVELS, RISK_THRESHOLDS } from '../lib/risk'
 import type { Page } from '../lib/navigation'
 import type { Place, TripFormValues } from '../types'
+
+const STEPS = [
+  {
+    title: 'Enter the haul',
+    body: 'Origin, destination, departure, and load. Checkpoints can be 10, 25, or 50 miles.',
+  },
+  {
+    title: 'Score three corridors',
+    body: 'We ask for three real truck routes, not one fastest path, so weather has room to matter.',
+  },
+  {
+    title: 'Weather at truck ETA',
+    body: 'Each stop is scored at the hour the truck arrives there — not the slider’s clock hour.',
+  },
+  {
+    title: 'Recommend the safest',
+    body: 'Fewest Severe miles, then High, then lowest average risk, then shortest time.',
+  },
+] as const
+
+const LOAD_RULES = [
+  '≥ 55 mph wind → No Travel for any load',
+  '45–54 mph + over 30,000 lb → No Travel',
+  '35–44 mph + over 40,000 lb → Severe',
+] as const
+
+const METRICS = [
+  { key: 'wind' as const, label: 'Wind', unit: 'mph' },
+  { key: 'rain' as const, label: 'Rain', unit: 'in/hr' },
+  { key: 'snow' as const, label: 'Snow', unit: 'in/hr' },
+]
 
 interface HomePageProps {
   form: TripFormValues
@@ -14,25 +48,25 @@ interface HomePageProps {
 const FEATURES = [
   {
     title: 'Real-Time Weather Data',
-    body: 'Get accurate forecasts along your entire route.',
+    body: 'Live Open-Meteo at each checkpoint lat/lon and the truck’s arrival hour.',
     tone: 'blue',
     icon: 'cloud',
   },
   {
     title: 'Risk-Aware Routing',
-    body: 'Avoid dangerous weather and reduce risk with smart routing.',
+    body: 'Severe miles first, then High, average risk, and time — plus load wind rules.',
     tone: 'green',
     icon: 'shield',
   },
   {
     title: 'Compare 3 Routes',
-    body: 'See distance, ETA, risk levels and choose the best option.',
+    body: 'Three real alternatives so a storm on the shortest path can lose.',
     tone: 'purple',
     icon: 'clock',
   },
   {
     title: 'Built for Truckers',
-    body: 'Consider load weight, road conditions and travel time.',
+    body: '42,000 lb default haul. 55 mph is No Travel; heavy loads tighten earlier bands.',
     tone: 'orange',
     icon: 'truck',
   },
@@ -67,6 +101,11 @@ export function HomePage({
               Compare three live corridors, score wind, rain, and snow at each checkpoint ETA, and
               take the safest route for your load.
             </p>
+            <ul className="home-proof">
+              <li>3 ranked corridors</li>
+              <li>Open-Meteo at lat/lon + ETA</li>
+              <li>Load-aware wind rules</li>
+            </ul>
           </div>
 
           <form
@@ -159,9 +198,123 @@ export function HomePage({
             </article>
           ))}
         </section>
+
+        <section className="home-how" id="how">
+          <div className="home-how-copy">
+            <h3>How a trip is scored</h3>
+            <p>
+              The planner does not pick the shortest drive and then color it. It ranks three
+              corridors from live forecasts at each arrival time, then applies the load wind rules.
+            </p>
+            <ol>
+              {STEPS.map((step, index) => (
+                <li key={step.title}>
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{step.title}</strong>
+                    <p>{step.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <aside className="home-result-card" aria-label="What you see after Analyze">
+            <p className="home-result-kicker">After Analyze</p>
+            <p className="home-result-title">Three corridors. One recommendation.</p>
+            <ul>
+              <li>
+                <i style={{ background: '#2563eb' }} />
+                <div>
+                  <strong>Route A</strong>
+                  <span>Recommended when Severe and High miles stay lowest</span>
+                </div>
+              </li>
+              <li>
+                <i style={{ background: '#7c3aed' }} />
+                <div>
+                  <strong>Route B</strong>
+                  <span>Shown if it is faster but carries more weather risk</span>
+                </div>
+              </li>
+              <li>
+                <i style={{ background: '#64748b' }} />
+                <div>
+                  <strong>Route C</strong>
+                  <span>A third corridor so overlap does not hide a safer option</span>
+                </div>
+              </li>
+            </ul>
+            <p className="home-result-note">
+              Map slider = corridor weather this hour. Left list = weather when the truck gets there.
+            </p>
+          </aside>
+        </section>
+
+        <section className="home-rules" id="rules">
+          <article className="home-rules-card">
+            <div className="home-rules-head">
+              <span className="home-feature-icon green" aria-hidden="true">
+                <Shield strokeWidth={1.75} />
+              </span>
+              <div>
+                <h3>Risk Rules</h3>
+                <p>These thresholds classify weather at each checkpoint.</p>
+              </div>
+            </div>
+            <div className="home-rules-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Condition</th>
+                    {RISK_LEVELS.map((level) => (
+                      <th key={level} data-level={level}>
+                        {RISK_LABELS[level]}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {METRICS.map((metric) => (
+                    <tr key={metric.key}>
+                      <th scope="row">
+                        {metric.label}
+                        <small>{metric.unit}</small>
+                      </th>
+                      {RISK_LEVELS.map((level) => (
+                        <td key={level}>{RISK_THRESHOLDS[level][metric.key]}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article className="home-rules-card">
+            <div className="home-rules-head">
+              <span className="home-feature-icon orange" aria-hidden="true">
+                <Truck strokeWidth={1.75} />
+              </span>
+              <div>
+                <h3>Load rules</h3>
+                <p>Heavier freight tightens the wind bands.</p>
+              </div>
+            </div>
+            <ul className="home-load-list">
+              {LOAD_RULES.map((rule) => (
+                <li key={rule}>
+                  <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                  <span>{rule}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        </section>
       </div>
 
-      <footer className="home-foot">Drive safer. Plan smarter. · WeatherRoute</footer>
+      <footer className="home-foot">
+        Drive safer. Plan smarter. · WeatherRoute · Open-Meteo · OpenStreetMap
+      </footer>
     </div>
   )
 }
