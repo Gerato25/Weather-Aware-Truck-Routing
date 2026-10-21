@@ -271,8 +271,8 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
           )}
           {plan?.provider.weather === 'demo-fallback' && (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
-              Live Open-Meteo hit today&apos;s request limit. Risk is scored as calm/dry until the quota resets. Uncheck
-              Demo and try again later for exact weather.
+              Live Open-Meteo hit today&apos;s request limit. Risk is scored as calm/dry until the quota resets. Check
+              Demo weather and Analyze for scripted storms, or try live weather again after the quota resets.
             </div>
           )}
           {error && (
