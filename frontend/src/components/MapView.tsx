@@ -562,12 +562,12 @@ function addLayer(map: MapLibreMap, layer: Parameters<MapLibreMap['addLayer']>[0
   }
   if ('layout' in layer && layer.layout) {
     for (const [key, value] of Object.entries(layer.layout)) {
-      map.setLayoutProperty(layer.id, key, value as never)
+      map.setLayoutProperty(layer.id, key as never, value as never)
     }
   }
   if ('paint' in layer && layer.paint) {
     for (const [key, value] of Object.entries(layer.paint)) {
-      map.setPaintProperty(layer.id, key, value as never)
+      map.setPaintProperty(layer.id, key as never, value as never)
     }
   }
 }
