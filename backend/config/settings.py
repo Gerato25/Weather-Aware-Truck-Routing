@@ -139,9 +139,17 @@ PHOTON_BASE_URL = os.getenv("PHOTON_BASE_URL", "https://photon.komoot.io")
 NOMINATIM_BASE_URL = os.getenv("NOMINATIM_BASE_URL", "https://nominatim.openstreetmap.org")
 GEOCODE_CACHE_SECONDS = int(os.getenv("GEOCODE_CACHE_SECONDS", "86400"))
 OPEN_METEO_BASE_URL = os.getenv("OPEN_METEO_BASE_URL", "https://api.open-meteo.com/v1/forecast")
+# Keyless fallback when Open-Meteo answers 429 (its quota is per shared host IP).
+MET_NORWAY_BASE_URL = os.getenv(
+    "MET_NORWAY_BASE_URL", "https://api.met.no/weatherapi/locationforecast/2.0/complete"
+)
+MET_NORWAY_MAX_WORKERS = int(os.getenv("MET_NORWAY_MAX_WORKERS", "8"))
 
-# Nominatim's usage policy requires a contactable User-Agent.
-USER_AGENT = os.getenv("USER_AGENT", "weather-aware-truck-routing/1.0 (+https://github.com/)")
+# Nominatim and MET Norway both require a User-Agent that identifies the app.
+USER_AGENT = os.getenv(
+    "USER_AGENT",
+    "weather-aware-truck-routing/1.0 (+https://github.com/Gerato25/Weather-Aware-Truck-Routing)",
+)
 
 HTTP_TIMEOUT_SECONDS = float(os.getenv("HTTP_TIMEOUT_SECONDS", "30"))
 WEATHER_BATCH_SIZE = int(os.getenv("WEATHER_BATCH_SIZE", "40"))

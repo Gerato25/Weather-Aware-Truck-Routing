@@ -228,11 +228,30 @@ class PointForecast:
         return j if frac >= 0.5 else i
 
 
+_DEFAULT_FALLBACK = object()
+_BLOCKED_KEY = "om:rate-limited"
+# After a 429, skip Open-Meteo for a while instead of burning retries on every
+# request. A daily-limit reply is re-checked hourly rather than at midnight
+# because shared hosts see quotas used by other tenants come and go.
+DAILY_LIMIT_BACKOFF_S = 3600
+BURST_LIMIT_BACKOFF_S = 120
+
+
+def _default_fallback():
+    from .met_norway import MetNorwayClient
+
+    return MetNorwayClient()
+
+
 class OpenMeteoClient:
     name = "open-meteo"
 
-    def __init__(self, base_url: str | None = None) -> None:
+    def __init__(self, base_url: str | None = None, fallback=_DEFAULT_FALLBACK) -> None:
         self.base_url = base_url or settings.OPEN_METEO_BASE_URL
+        # Keyless provider used when Open-Meteo answers 429; None disables it.
+        self.fallback = _default_fallback() if fallback is _DEFAULT_FALLBACK else fallback
+        # Which provider actually served the last ``forecasts`` call.
+        self.source = self.name
 
     # -- public API ---------------------------------------------------------
 
@@ -254,28 +273,59 @@ class OpenMeteoClient:
             else:
                 missing.append(key)
 
-        if missing:
-            batches = [
-                missing[i : i + settings.WEATHER_BATCH_SIZE]
-                for i in range(0, len(missing), settings.WEATHER_BATCH_SIZE)
-            ]
-            pause = max(0.0, float(getattr(settings, "WEATHER_MIN_INTERVAL_SECONDS", 0.35)))
-            # One in-flight Open-Meteo call at a time. Parallel batches are what
-            # trigger 429s on the free forecast endpoint.
-            with _OPEN_METEO_GATE:
-                for index, batch in enumerate(batches):
-                    if index:
-                        time.sleep(pause)
-                    fetched = self._fetch_batch(batch, forecast_days)
-                    for key, forecast in fetched.items():
-                        results[key] = forecast
-                        cache.set(
-                            self._cache_key(key, forecast_days),
-                            forecast,
-                            settings.WEATHER_CACHE_SECONDS,
-                        )
+        self.source = self.name
+        if not missing:
+            return results
+
+        try:
+            if cache.get(_BLOCKED_KEY):
+                raise UpstreamError(
+                    "Open-Meteo rate-limited recently; skipping it for now",
+                    provider="Open-Meteo",
+                    status=429,
+                )
+            self._fetch_missing(missing, forecast_days, results)
+        except UpstreamError as exc:
+            if exc.status != 429:
+                raise
+            if not cache.get(_BLOCKED_KEY):
+                backoff = DAILY_LIMIT_BACKOFF_S if _is_daily_limit(exc) else BURST_LIMIT_BACKOFF_S
+                cache.set(_BLOCKED_KEY, True, backoff)
+            if self.fallback is None:
+                raise
+            remaining = [key for key in missing if key not in results]
+            try:
+                results.update(self.fallback.forecasts(remaining, forecast_days))
+            except UpstreamError as fallback_exc:
+                logger.warning("Weather fallback %s failed: %s", self.fallback.name, fallback_exc)
+                raise exc from fallback_exc
+            logger.warning("Open-Meteo rate-limited; served %s points from %s", len(remaining), self.fallback.name)
+            self.source = self.fallback.name
 
         return results
+
+    def _fetch_missing(
+        self, missing: list[Coord], forecast_days: int, results: dict[Coord, PointForecast]
+    ) -> None:
+        batches = [
+            missing[i : i + settings.WEATHER_BATCH_SIZE]
+            for i in range(0, len(missing), settings.WEATHER_BATCH_SIZE)
+        ]
+        pause = max(0.0, float(getattr(settings, "WEATHER_MIN_INTERVAL_SECONDS", 0.35)))
+        # One in-flight Open-Meteo call at a time. Parallel batches are what
+        # trigger 429s on the free forecast endpoint.
+        with _OPEN_METEO_GATE:
+            for index, batch in enumerate(batches):
+                if index:
+                    time.sleep(pause)
+                fetched = self._fetch_batch(batch, forecast_days)
+                for key, forecast in fetched.items():
+                    results[key] = forecast
+                    cache.set(
+                        self._cache_key(key, forecast_days),
+                        forecast,
+                        settings.WEATHER_CACHE_SECONDS,
+                    )
 
     def forecast_days_for(self, latest: datetime) -> int:
         """How many forecast days cover everything up to ``latest``.

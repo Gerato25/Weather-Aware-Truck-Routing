@@ -596,7 +596,7 @@ def plan_trip(
                 if weather_fallback
                 else "demo"
                 if demo_scenario == "load_wind"
-                else client.name
+                else getattr(client, "source", client.name)
             ),
             "wind_metric": wind_metric,
         },

@@ -262,7 +262,9 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
             <p className="mt-2 text-[11px] font-medium text-slate-600">
               {plan.provider.weather === 'open-meteo'
                 ? 'Weather source: live Open-Meteo at each checkpoint lat/lon and truck ETA.'
-                : plan.provider.weather === 'demo'
+                : plan.provider.weather === 'met-norway'
+                  ? 'Weather source: live MET Norway forecast at each checkpoint and truck ETA (Open-Meteo was rate-limited).'
+                  : plan.provider.weather === 'demo'
                   ? 'Weather source: scripted demo storms (Demo box was checked).'
                   : plan.provider.weather === 'demo-fallback'
                     ? 'Weather source: Open-Meteo unavailable. Dry placeholders only — not scripted storms.'
@@ -271,8 +273,8 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
           )}
           {plan?.provider.weather === 'demo-fallback' && (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
-              Live Open-Meteo hit today&apos;s request limit. Risk is scored as calm/dry until the quota resets. Check
-              Demo weather and Analyze for scripted storms, or try live weather again after the quota resets.
+              Open-Meteo and the MET Norway backup were both unavailable. Risk is scored as calm/dry, so do not
+              rely on this recommendation. Try again shortly, or check Demo weather and Analyze for scripted storms.
             </div>
           )}
           {error && (

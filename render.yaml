@@ -17,7 +17,7 @@ services:
       - key: CORS_ALLOW_ALL_ORIGINS
         value: "True"
       - key: USER_AGENT
-        value: weather-aware-truck-routing/1.0 (https://github.com/)
+        value: weather-aware-truck-routing/1.0 (+https://github.com/Gerato25/Weather-Aware-Truck-Routing)
       # Optional. Leave empty to use the public OSRM fallback (car profile).
       # Free key: https://openrouteservice.org/dev/#/signup
       - key: OPENROUTESERVICE_API_KEY

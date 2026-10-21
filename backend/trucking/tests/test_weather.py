@@ -31,7 +31,7 @@ class OpenMeteoRetryTests(SimpleTestCase):
         cache.clear()
 
     def test_retries_429_then_succeeds(self):
-        client = OpenMeteoClient()
+        client = OpenMeteoClient(fallback=None)
         busy = UpstreamError("too many", provider="Open-Meteo", status=429, retry_after=0.01)
         with mock.patch(
             "trucking.weather.open_meteo.request_json",
@@ -44,7 +44,7 @@ class OpenMeteoRetryTests(SimpleTestCase):
         self.assertEqual(len(result), 1)
 
     def test_gives_up_after_repeated_429s(self):
-        client = OpenMeteoClient()
+        client = OpenMeteoClient(fallback=None)
         busy = UpstreamError("too many", provider="Open-Meteo", status=429)
         with mock.patch(
             "trucking.weather.open_meteo.request_json",
@@ -56,7 +56,7 @@ class OpenMeteoRetryTests(SimpleTestCase):
         self.assertEqual(raised.exception.status, 429)
 
     def test_daily_limit_429_is_not_retried(self):
-        client = OpenMeteoClient()
+        client = OpenMeteoClient(fallback=None)
         busy = UpstreamError(
             "Open-Meteo returned 429: Daily API request limit exceeded. Please try again tomorrow.",
             provider="Open-Meteo",
@@ -72,7 +72,7 @@ class OpenMeteoRetryTests(SimpleTestCase):
         self.assertEqual(raised.exception.status, 429)
 
     def test_demo_mode_does_not_call_open_meteo(self):
-        client = OpenMeteoClient()
+        client = OpenMeteoClient(fallback=None)
         with mock.patch("trucking.weather.open_meteo.request_json") as request:
             result, fallback = forecasts_for_request(
                 client,
@@ -87,7 +87,7 @@ class OpenMeteoRetryTests(SimpleTestCase):
         self.assertTrue(calm_forecasts([(-87.63, 41.88)]))
 
     def test_daily_limit_falls_back_to_local_weather(self):
-        client = OpenMeteoClient()
+        client = OpenMeteoClient(fallback=None)
         busy = UpstreamError(
             "Open-Meteo returned 429: Daily API request limit exceeded. Please try again tomorrow.",
             provider="Open-Meteo",
@@ -104,7 +104,7 @@ class OpenMeteoRetryTests(SimpleTestCase):
         self.assertAlmostEqual(sample.wind_mph, 8.0, places=1)
 
     def test_non_429_errors_are_not_retried(self):
-        client = OpenMeteoClient()
+        client = OpenMeteoClient(fallback=None)
         boom = UpstreamError("down", provider="Open-Meteo", status=502)
         with mock.patch(
             "trucking.weather.open_meteo.request_json",
