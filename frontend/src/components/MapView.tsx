@@ -737,7 +737,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.checkpoints,
     filter: ['==', ['get', 'elevated'], 0],
     paint: {
-      'circle-color': theme === 'light' ? '#ffffff' : '#ecfdf5',
+      'circle-color': riskColorExpression,
       'circle-radius': [
         'interpolate',
         ['linear'],
@@ -749,7 +749,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
       ],
       'circle-opacity': ['case', ['get', 'selected'], 1, 0.92],
       'circle-stroke-width': ['case', ['get', 'selected'], 2.2, 1.6],
-      'circle-stroke-color': theme === 'light' ? riskColorExpression : ['get', 'identity'],
+      'circle-stroke-color': '#ffffff',
     },
   })
 

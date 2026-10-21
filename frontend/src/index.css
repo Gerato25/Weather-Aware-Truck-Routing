@@ -3287,6 +3287,7 @@ input[type='range']::-webkit-slider-runnable-track {
 .home-hero .home {
   position: relative;
   z-index: 1;
+  width: min(1200px, calc(100% - 40px));
 }
 
 .home-hero-copy {
@@ -3315,18 +3316,55 @@ input[type='range']::-webkit-slider-runnable-track {
 
 .home-plan-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(170px, 0.95fr) minmax(120px, 0.7fr) auto;
-  gap: 10px;
+  grid-template-columns: minmax(150px, 1.15fr) minmax(150px, 1.15fr) minmax(228px, 1.05fr) minmax(118px, 0.62fr) auto;
+  gap: 10px 12px;
   align-items: end;
-  padding: 16px;
+  padding: 14px 16px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 22px;
+  border-radius: 24px;
   box-shadow: var(--shadow);
 }
 
+.home-plan-card .location-resolved {
+  display: none;
+}
+
+.home-plan-card .field label {
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.home-plan-card .field-shell {
+  position: relative;
+  height: 46px;
+  padding: 0 12px;
+}
+
+.home-plan-card input[type='datetime-local'] {
+  min-width: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-plan-card input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.home-plan-meta {
+  display: contents;
+}
+
 .home-plan-submit {
-  height: 42px;
+  height: 46px;
+  padding: 0 18px;
   white-space: nowrap;
 }
 
@@ -3578,10 +3616,15 @@ input[type='range']::-webkit-slider-runnable-track {
   }
 
   .home-plan-card,
+  .home-plan-meta,
   .home-features,
   .home-how,
   .home-how ol {
     grid-template-columns: 1fr;
+  }
+
+  .home-plan-submit {
+    width: 100%;
   }
 
   .home-hero-copy h2 {

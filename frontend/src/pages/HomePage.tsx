@@ -124,53 +124,55 @@ export function HomePage({
               onChange={(value) => onFormChange('destination', value)}
               onResolve={(place: Place | null) => onFormChange('destinationPlace', place)}
             />
-            <div className="field">
-              <label htmlFor="home-departure">Departure Date &amp; Time</label>
-              <div className="field-shell">
-                <span className="field-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M8 3v4M16 3v4M4 10h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                </span>
-                <input
-                  id="home-departure"
-                  type="datetime-local"
-                  value={form.departure}
-                  onChange={(event) => onFormChange('departure', event.target.value)}
-                />
+            <div className="home-plan-meta">
+              <div className="field">
+                <label htmlFor="home-departure">Departure</label>
+                <div className="field-shell">
+                  <span className="field-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                      <path d="M8 3v4M16 3v4M4 10h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <input
+                    id="home-departure"
+                    type="datetime-local"
+                    value={form.departure}
+                    onChange={(event) => onFormChange('departure', event.target.value)}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="field">
-              <label htmlFor="home-load">Load Weight (lb)</label>
-              <div className="field-shell">
-                <span className="field-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path
-                      d="M3 16V8h11l4 4v4H3zM14 8v4h4M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
-                <input
-                  id="home-load"
-                  type="number"
-                  min={0}
-                  max={80000}
-                  step={1000}
-                  value={form.loadLb}
-                  aria-valuetext={formatPounds(form.loadLb)}
-                  onChange={(event) => onFormChange('loadLb', Number(event.target.value))}
-                />
-                <span className="field-suffix">lb</span>
+              <div className="field">
+                <label htmlFor="home-load">Load</label>
+                <div className="field-shell">
+                  <span className="field-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M3 16V8h11l4 4v4H3zM14 8v4h4M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <input
+                    id="home-load"
+                    type="number"
+                    min={0}
+                    max={80000}
+                    step={1000}
+                    value={form.loadLb}
+                    aria-valuetext={formatPounds(form.loadLb)}
+                    onChange={(event) => onFormChange('loadLb', Number(event.target.value))}
+                  />
+                  <span className="field-suffix">lb</span>
+                </div>
               </div>
+              <button type="submit" className="primary home-plan-submit" disabled={!canSubmit}>
+                Find safest route
+              </button>
             </div>
-            <button type="submit" className="primary home-plan-submit" disabled={!canSubmit}>
-              Find Safest Route →
-            </button>
           </form>
         </div>
       </section>

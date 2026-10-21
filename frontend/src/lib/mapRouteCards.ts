@@ -1,10 +1,10 @@
 import { Marker, type Map as MapLibreMap } from 'maplibre-gl'
 
 import { formatClock, formatDuration, formatMiles } from './format'
-import { RISK_COLORS } from './risk'
+import { RISK_COLORS, RISK_LABELS } from './risk'
 import { routeLetter } from './routeMeta'
 import { truckAtHour } from './truckAtHour'
-import type { Route } from '../types'
+import type { RiskDisplaySlug, Route } from '../types'
 
 import './mapRouteCards.css'
 
@@ -44,11 +44,27 @@ function placeCard(route: Route, index: number, taken: [number, number][]): [num
   return alongFraction(route, start)
 }
 
+function worstRisk(route: Route): RiskDisplaySlug {
+  const miles = route.summary.miles_by_level
+  if ((miles.NO_TRAVEL ?? 0) > 0) return 'NO_TRAVEL'
+  if ((miles.SEVERE ?? 0) > 0) return 'SEVERE'
+  if ((miles.HIGH ?? 0) > 0) return 'HIGH'
+  if ((miles.MODERATE ?? 0) > 0) return 'MODERATE'
+  if (route.checkpoints.some((checkpoint) => checkpoint.risk.available === false)) return 'UNKNOWN'
+  return 'LOW'
+}
+
+function riskPill(level: RiskDisplaySlug): string {
+  const ink = level === 'MODERATE' || level === 'UNKNOWN' ? '#0f172a' : '#ffffff'
+  return `<span class="map-route-card-pill" style="background:${RISK_COLORS[level]};color:${ink}">${RISK_LABELS[level]}</span>`
+}
+
 function cardHtml(route: Route, index: number, recommended: boolean, expanded: boolean): string {
   const letter = routeLetter(index)
   const summary = `${formatDuration(route.summary.duration_hours)} · ${formatMiles(route.summary.distance_miles)}`
+  const pill = riskPill(worstRisk(route))
   if (!expanded) {
-    return `<p class="map-route-card-title">${recommended ? 'Rec · ' : ''}Route ${letter} · ${summary}</p>`
+    return `<p class="map-route-card-title">${recommended ? 'Rec · ' : ''}Route ${letter} · ${summary} ${pill}</p>`
   }
   const severe = Math.round(route.summary.miles_by_level.SEVERE + route.summary.miles_by_level.NO_TRAVEL)
   const high = Math.round(route.summary.miles_by_level.HIGH)
