@@ -1,21 +1,16 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CalendarClock,
-  CloudRain,
   Flag,
   Loader2,
   MapPin,
-  Pause,
-  Play,
   Search,
-  Snowflake,
-  Thermometer,
   Weight,
-  Wind,
   Route as RouteIcon,
 } from 'lucide-react'
 
 import { AppHeader } from '../components/AppHeader'
+import { CorridorPanel } from '../components/CorridorPanel'
 import { CheckpointDetails } from '../components/dashboard/CheckpointDetails'
 import { DashField, dashControlClass } from '../components/dashboard/DashField'
 import { MapView } from '../components/MapView'
@@ -24,24 +19,9 @@ import { RouteCompareStrip, RouteDetails } from '../components/dashboard/RouteDe
 import type { useTripSession } from '../hooks/useTripSession'
 import type { Page } from '../lib/navigation'
 import type { Theme } from '../lib/theme'
-import {
-  corridorHourStats,
-  corridorRiskStops,
-  corridorSampleAt,
-} from '../lib/corridorHour'
-import { truckAtHour } from '../lib/truckAtHour'
-import {
-  formatDateTime,
-  formatForecastStamp,
-  formatWeather,
-} from '../lib/format'
+import { formatForecastStamp } from '../lib/format'
 import type { OverlayMode } from '../lib/corridorHeat'
-import {
-  RISK_COLORS,
-  RISK_LABELS,
-  RISK_LEVELS,
-  routeColor,
-} from '../lib/risk'
+import { RISK_COLORS, RISK_INK, RISK_LABELS, RISK_LEVELS, routeColor } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
 import type { Checkpoint } from '../types'
 
@@ -55,48 +35,15 @@ interface DashboardPageProps {
 }
 
 const INTERVALS: Array<10 | 25 | 50> = [10, 25, 50]
-const FORECAST_PLAY_MS = 1000
+const FORECAST_PLAY_HOURS_PER_SEC = 1
 const SHELL = 'mx-auto w-full max-w-[1680px] px-3 sm:px-4'
 
-function forecastTicks(max: number): number[] {
-  if (max <= 0) return [0]
-  const step = max <= 12 ? Math.max(1, Math.round(max / 4)) : max <= 24 ? 6 : 12
-  const ticks: number[] = []
-  for (let hour = 0; hour <= max; hour += step) ticks.push(hour)
-  if (ticks[ticks.length - 1] !== max) ticks.push(max)
-  return ticks
-}
-
-const OVERLAY_MODES: Array<{ id: OverlayMode; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'wind', label: 'Wind' },
-  { id: 'rain', label: 'Rain' },
-  { id: 'snow', label: 'Snow' },
-  { id: 'off', label: 'Off' },
-]
-
-const DETAIL_SCALES: Record<
-  'wind' | 'rain' | 'snow',
-  { label: string; unit: string; swatch: string; ticks: string[] }
-> = {
-  rain: {
-    label: 'Rain',
-    unit: 'in/hr',
-    swatch: 'linear-gradient(90deg, #dbeafe, #3b82f6, #1e3a8a)',
-    ticks: ['0', '0.10', '0.25', '0.50', '1.00'],
-  },
-  wind: {
-    label: 'Wind',
-    unit: 'mph',
-    swatch: 'linear-gradient(90deg, #e0f2fe, #0284c7, #4c1d95)',
-    ticks: ['0', '25', '35', '45', '55'],
-  },
-  snow: {
-    label: 'Snow',
-    unit: 'in/hr',
-    swatch: 'linear-gradient(90deg, #ede9fe, #a78bfa, #4c1d95)',
-    ticks: ['0', '0.5', '1.0', '2.0', '3.0'],
-  },
+function overlayTimestamp(departure: string | undefined, hour: number, hours: string[] | undefined): string | null {
+  const listed = hours?.[Math.round(hour)]
+  if (listed) return listed
+  if (!departure) return null
+  const ms = new Date(departure).getTime() + hour * 3_600_000
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null
 }
 
 function pickCheckpoint(route: { checkpoints: Checkpoint[] }): Checkpoint | null {
@@ -108,13 +55,6 @@ function pickCheckpoint(route: { checkpoints: Checkpoint[] }): Checkpoint | null
   return inner[Math.floor(inner.length / 2)] ?? points[0]
 }
 
-function corridorGradient(stops: ReturnType<typeof corridorRiskStops>): string {
-  if (!stops.length) return '#e2e8f0'
-  return `linear-gradient(90deg, ${stops
-    .map((stop) => `${RISK_COLORS[stop.level]} ${Math.round(stop.t * 100)}%`)
-    .join(', ')})`
-}
-
 export function DashboardPage({ session, theme, onTheme, onNavigate }: DashboardPageProps) {
   const {
     form,
@@ -124,7 +64,6 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
     error,
     runPlan,
     selectedRouteId,
-    selectedRoute,
     focused,
     setFocused,
     corridor,
@@ -179,8 +118,13 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
       revealRoute(ref.routeId)
       setPanToFocused(true)
       setFocused(ref)
+      const route = plan?.routes.find((item) => item.id === ref.routeId)
+      const checkpoint = route?.checkpoints.find((item) => item.index === ref.index)
+      if (checkpoint) {
+        setHeatHour(Math.max(0, Math.min(48, Math.round(checkpoint.elapsed_minutes / 60))))
+      }
     },
-    [revealRoute, setFocused],
+    [plan, revealRoute, setFocused, setHeatHour],
   )
 
   const toggleRouteVisible = useCallback(
@@ -204,7 +148,9 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
     [plan, selectedRouteId, selectRoute, setFocused],
   )
 
-  const overlayHasData = rasterAvailable || Boolean(corridor?.points.length)
+  const overlayHasData =
+    rasterAvailable ||
+    Boolean(corridor?.raster || corridor?.arrows?.features.length || corridor?.points.length)
   const focusedRoute = plan?.routes.find((route) => route.id === focused?.routeId) ?? null
   const focusedCheckpoint =
     focusedRoute && focused
@@ -213,39 +159,27 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
   const focusedRouteIndex = plan && focusedRoute ? plan.routes.findIndex((route) => route.id === focusedRoute.id) : -1
   const forecastUnavailable = Boolean(plan) && !corridorLoading && !corridor && !rasterAvailable
   const sliderMax = corridor ? Math.max(0, Math.min(48, corridor.hours.length - 1)) : 48
-  const overlayAt = corridor?.hours[Math.min(heatHour, sliderMax)] ?? null
+  const overlayAt = overlayTimestamp(plan?.request.departure, heatHour, corridor?.hours)
   const canSubmit = form.origin.trim().length > 1 && form.destination.trim().length > 1 && !planning
 
   useEffect(() => {
     if (!forecastPlaying || !plan || overlayMode === 'off' || sliderMax <= 0) return
-    const timer = window.setInterval(() => {
-      setHeatHour((hour) => (hour >= sliderMax ? 0 : hour + 1))
-    }, FORECAST_PLAY_MS)
-    return () => window.clearInterval(timer)
+    let last = performance.now()
+    let frame = 0
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000)
+      last = now
+      setHeatHour((hour) => {
+        const next = hour + dt * FORECAST_PLAY_HOURS_PER_SEC
+        return next >= sliderMax ? 0 : next
+      })
+      frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
   }, [forecastPlaying, plan, overlayMode, sliderMax, setHeatHour])
 
-  const detailScale =
-    overlayMode === 'wind' || overlayMode === 'rain' || overlayMode === 'snow'
-      ? DETAIL_SCALES[overlayMode]
-      : null
   const showNoTravel = Boolean(plan?.routes.some((route) => route.summary.miles_by_level.NO_TRAVEL > 0.05))
-  const fill = sliderMax === 0 ? 0 : (Math.min(heatHour, sliderMax) / sliderMax) * 100
-  const hourStats = corridorHourStats(corridor, heatHour)
-  const hourHasOverlay = Boolean(
-    hourStats &&
-      [hourStats.wind, hourStats.rain, hourStats.snow, hourStats.temp].some(
-        (value) => value != null && Number.isFinite(value),
-      ),
-  )
-  const riskStops = corridorRiskStops(corridor, heatHour)
-  const truck = truckAtHour(selectedRoute, heatHour)
-  const truckForecast =
-    truck && corridor ? corridorSampleAt(corridor, truck.lon, truck.lat, heatHour) : null
-  const locationWeather = truckForecast ?? hourStats
-  const locationForecast =
-    focusedCheckpoint && corridor
-      ? corridorSampleAt(corridor, focusedCheckpoint.lon, focusedCheckpoint.lat, heatHour)
-      : null
 
   return (
     <div className="dash-app min-h-screen">
@@ -333,8 +267,13 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
               checked={form.demoLoadWind}
               onChange={(event) => updateField('demoLoadWind', event.target.checked)}
             />
-            Demo weather: 40 mph wind on Route A (42,000 lb → Severe). Re-analyze to apply.
+            Demo weather: storms move hour by hour (calm at +0h, gone by ~+30h). Re-analyze to apply.
           </label>
+          {plan?.provider.weather === 'demo-fallback' && (
+            <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
+              Live Open-Meteo hit today&apos;s request limit. Showing demo storms so you can keep working.
+            </div>
+          )}
           {error && (
             <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
               {error}
@@ -344,12 +283,12 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
 
         <div className="dash-map-row has-drawer">
           <aside className="dash-drawer-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 px-3 py-2">
+            <div className="shrink-0 border-b border-slate-100 px-3 py-2">
               <h2 className="text-sm font-semibold text-slate-900">Routes</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">Compare time, distance, and weather risk</p>
             </div>
             {plan ? (
-              <div className="border-b border-slate-100 p-2">
+              <div className="shrink-0 border-b border-slate-100 p-2">
                 <RouteCompareStrip
                   plan={plan}
                   selectedRouteId={selectedRouteId}
@@ -413,82 +352,45 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
             {plan && (
               <>
                 <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
-                  <div className="flex flex-wrap items-center justify-end gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow-sm">
-                    <div className="dash-overlay-tabs" role="tablist" aria-label="Weather overlay">
-                      {OVERLAY_MODES.map((layer) => (
-                        <button
-                          key={layer.id}
-                          type="button"
-                          role="tab"
-                          aria-selected={overlayMode === layer.id}
-                          className="dash-overlay-tab"
-                          onClick={() => setOverlayMode(layer.id)}
-                        >
-                          {layer.label}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="px-1.5 text-[11px] font-semibold text-slate-600">+{heatHour}h</span>
-                  </div>
                   {overlayMode !== 'off' && !corridorLoading && !overlayHasData && (
                     <div className="rounded-lg bg-white/95 px-3 py-1.5 text-xs text-amber-800 shadow-sm">
                       Live weather overlay unavailable
                     </div>
                   )}
-                  <div className="rounded-lg border border-slate-200 bg-white/95 px-2.5 py-2 text-[10px] leading-4 text-slate-700 shadow-sm">
-                    <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      {(plan.routes ?? []).slice(0, 3).map((route, index) => (
-                        <label key={route.id} className="flex cursor-pointer items-center gap-1">
-                          <input
-                            type="checkbox"
-                            className="h-3 w-3 accent-[#0b1f3a]"
-                            checked={!hiddenRouteIds.includes(route.id)}
-                            aria-label={`Show Route ${routeLetter(index)}`}
-                            onChange={() => toggleRouteVisible(route.id)}
-                          />
-                          <i className="h-2 w-2 rounded-full" style={{ background: routeColor(index) }} />
-                          {routeLetter(index)}
-                        </label>
-                      ))}
+                  <div className="dash-map-legend w-[11.5rem] rounded-lg border border-slate-200 bg-white/95 px-2.5 py-2 text-[10px] leading-4 text-slate-700 shadow-sm">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      {(plan.routes ?? []).slice(0, 3).map((route, index) => {
+                        const hidden = hiddenRouteIds.includes(route.id)
+                        return (
+                          <button
+                            key={route.id}
+                            type="button"
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold"
+                            style={{ opacity: hidden ? 0.35 : 1 }}
+                            aria-pressed={!hidden}
+                            aria-label={`${hidden ? 'Show' : 'Hide'} Route ${routeLetter(index)}`}
+                            onClick={() => toggleRouteVisible(route.id)}
+                          >
+                            <i className="h-2 w-2 rounded-full" style={{ background: routeColor(index) }} />
+                            {routeLetter(index)}
+                          </button>
+                        )
+                      })}
                     </div>
-                    <p className="font-semibold text-slate-800">Color = risk level</p>
-                    {detailScale ? (
-                      <div className="mt-0.5">
-                        <p className="text-[9px] text-slate-500">
-                          {detailScale.label} ({detailScale.unit})
-                        </p>
-                        <i className="mt-0.5 block h-1.5 w-full rounded-full" style={{ background: detailScale.swatch }} />
-                        <div className="mt-0.5 flex justify-between text-[8px] tabular-nums text-slate-500">
-                          {detailScale.ticks.map((tick) => (
-                            <span key={tick}>{tick}</span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        {RISK_LEVELS.filter((level) => level !== 'NO_TRAVEL' || showNoTravel).map((level) => (
-                          <span key={level} className="inline-flex items-center gap-1">
-                            <i className="h-2 w-2 rounded-full" style={{ background: RISK_COLORS[level] }} />
-                            {RISK_LABELS[level]}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                    <p className="mb-0.5 mt-1.5 font-semibold text-slate-800">Symbol = cause</p>
-                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span className="inline-flex items-center gap-1">
-                        <CauseGlyph kind="wind" />
-                        arrow wind
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <CauseGlyph kind="rain" />
-                        drop rain
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <CauseGlyph kind="snow" />
-                        flake snow
-                      </span>
+                    <p className="font-semibold text-slate-800">42 mi corridor</p>
+                    <span className="mt-0.5 flex items-center gap-1.5">
+                      {RISK_LEVELS.filter((level) => level !== 'NO_TRAVEL' || showNoTravel).map((level) => (
+                        <i
+                          key={level}
+                          className="h-2 w-2 rounded-full"
+                          title={RISK_LABELS[level]}
+                          style={{ background: RISK_COLORS[level], boxShadow: `0 0 0 1px ${RISK_INK[level]}22` }}
+                        />
+                      ))}
                     </span>
+                    <p className="mt-1.5 text-[9px] leading-4 text-slate-500">
+                      Smooth weather at the slider hour. Dots stay on truck ETA.
+                    </p>
                   </div>
                 </div>
               </>
@@ -505,11 +407,11 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
           </section>
 
           <aside className="dash-drawer-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 px-3 py-2">
+            <div className="shrink-0 border-b border-slate-100 px-3 py-2">
               <h2 className="text-sm font-semibold text-slate-900">Checkpoint Details</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">Weather at the selected stop’s truck ETA</p>
             </div>
-            <div className="p-3">
+            <div className="min-h-0 flex-1 overflow-auto p-3">
               {focusedCheckpoint && focusedRoute && plan && focusedRouteIndex >= 0 ? (
                 <CheckpointDetails
                   route={focusedRoute}
@@ -519,10 +421,6 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
                   destination={plan.request.destination.label}
                   loadLb={plan.request.load_lb}
                   departure={plan.request.departure}
-                  heatHour={heatHour}
-                  overlayAt={overlayAt}
-                  locationForecast={locationForecast}
-                  corridorLoading={corridorLoading}
                 />
               ) : (
                 <p className="px-2 py-4 text-center text-xs leading-5 text-slate-500">
@@ -535,84 +433,33 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
           </aside>
         </div>
 
-        <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm sm:px-4">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <p className="text-xs font-semibold text-slate-700">Forecast time</p>
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-              +{heatHour}h{overlayAt ? ` · ${formatDateTime(overlayAt)}` : ''}
-            </span>
-            <button
-              type="button"
-              aria-pressed={forecastPlaying}
-              aria-label={forecastPlaying ? 'Pause forecast' : 'Play forecast'}
-              disabled={!plan}
-              className="dash-btn-primary grid h-8 w-8 shrink-0 place-items-center rounded-lg disabled:cursor-not-allowed"
-              onClick={() => setForecastPlaying((value) => !value)}
-            >
-              {forecastPlaying ? (
-                <Pause className="h-3.5 w-3.5" fill="currentColor" />
-              ) : (
-                <Play className="h-3.5 w-3.5" fill="currentColor" />
-              )}
-            </button>
-            <div className="min-w-[12rem] flex-1">
-              <input
-                type="range"
-                min={0}
-                max={sliderMax}
-                step={1}
-                value={Math.min(heatHour, sliderMax)}
-                aria-label={`Forecast hour offset, 0 to ${sliderMax} hours`}
-                className="dash-forecast-slider w-full"
-                style={{
-                  background: `linear-gradient(to right, #2563eb ${fill}%, #e2e8f0 ${fill}%)`,
-                }}
-                onPointerDown={() => setForecastPlaying(false)}
-                onChange={(event) => setHeatHour(Number(event.target.value))}
-                disabled={!plan}
-              />
-              <div className="mt-0.5 flex justify-between text-[10px] font-medium text-slate-500">
-                {forecastTicks(sliderMax).map((tick) => (
-                  <span key={tick}>{tick}h</span>
-                ))}
-              </div>
-            </div>
-            <dl className="flex flex-wrap gap-3 text-[12px]">
-              <InlineStat icon={<Wind className="h-3.5 w-3.5 text-sky-600" />} label="Wind" value={formatWeather(locationWeather?.wind, 0, ' mph')} />
-              <InlineStat icon={<CloudRain className="h-3.5 w-3.5 text-blue-600" />} label="Rain" value={formatWeather(locationWeather?.rain, 2, ' in/hr')} />
-              <InlineStat icon={<Snowflake className="h-3.5 w-3.5 text-indigo-500" />} label="Snow" value={formatWeather(locationWeather?.snow, 1, ' in/hr')} />
-              <InlineStat icon={<Thermometer className="h-3.5 w-3.5 text-orange-500" />} label="Temp" value={formatWeather(locationWeather?.temp, 0, '°F')} />
-            </dl>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <div
-              className="dash-risk-strip min-w-[10rem] flex-1"
-              style={{ background: riskStops.length ? corridorGradient(riskStops) : undefined }}
-              aria-label="Forecast risk along the selected corridor"
-            />
-            <div className="flex flex-wrap items-center gap-x-2.5 text-[10px] text-slate-600">
-              {RISK_LEVELS.filter((level) => level !== 'NO_TRAVEL' || showNoTravel).map((level) => (
-                <span key={level} className="inline-flex items-center gap-1">
-                  <i className="h-2 w-2 rounded-full" style={{ background: RISK_COLORS[level] }} />
-                  {RISK_LABELS[level]}
-                </span>
-              ))}
-            </div>
-            {truck && selectedRoute && (
-              <p className="text-[10px] text-slate-500">
-                {truck.arrived ? 'Truck arrived' : `Truck near mile ${Math.round(truck.mile)}`} · overlay only
-              </p>
-            )}
-          </div>
-          {forecastUnavailable && (
-            <p className="mt-2 text-xs text-amber-800">Corridor forecast unavailable for this hour.</p>
-          )}
-          {plan && corridor && !corridorLoading && !hourHasOverlay && (
-            <p className="mt-2 text-xs text-amber-800">
-              No overlay forecast for {overlayAt ? formatForecastStamp(overlayAt) : `+${heatHour}h`}. ETA weather is unchanged.
-            </p>
-          )}
-        </section>
+        <CorridorPanel
+          plan={plan}
+          selectedRouteId={selectedRouteId}
+          heatHour={heatHour}
+          sliderMax={sliderMax}
+          overlayMode={overlayMode}
+          overlayAt={overlayAt}
+          forecastPlaying={forecastPlaying}
+          showNoTravel={showNoTravel}
+          onMode={(mode) => {
+            setForecastPlaying(false)
+            setOverlayMode(mode)
+          }}
+          onHour={(hour) => {
+            setForecastPlaying(false)
+            setHeatHour(hour)
+          }}
+          onPlay={() => setForecastPlaying((value) => !value)}
+        />
+        {forecastUnavailable && (
+          <p className="text-xs text-amber-800">Corridor forecast unavailable for this hour.</p>
+        )}
+        {plan && corridor && !corridorLoading && overlayMode !== 'off' && !overlayHasData && (
+          <p className="text-xs text-amber-800">
+            No overlay forecast for {overlayAt ? formatForecastStamp(overlayAt) : `+${heatHour}h`}. ETA weather is unchanged.
+          </p>
+        )}
       </main>
 
       <footer className="bg-[#0b1f3a] text-slate-300">
@@ -625,44 +472,6 @@ export function DashboardPage({ session, theme, onTheme, onNavigate }: Dashboard
           <p>Powered by OpenFreeMap · OpenStreetMap · Open-Meteo</p>
         </div>
       </footer>
-    </div>
-  )
-}
-
-function CauseGlyph({ kind }: { kind: 'wind' | 'rain' | 'snow' }) {
-  if (kind === 'wind') {
-    return (
-      <svg viewBox="0 0 16 16" className="h-3 w-3 shrink-0 text-slate-700" aria-hidden>
-        <path fill="currentColor" d="M8 1.2 13.2 8H9.6v6.8H6.4V8H2.8z" />
-      </svg>
-    )
-  }
-  if (kind === 'rain') {
-    return (
-      <svg viewBox="0 0 16 16" className="h-3 w-3 shrink-0 text-slate-700" aria-hidden>
-        <path fill="currentColor" d="M8 1.4C8 1.4 3.4 7.2 3.4 10.1a4.6 4.6 0 0 0 9.2 0C12.6 7.2 8 1.4 8 1.4z" />
-      </svg>
-    )
-  }
-  return (
-    <svg viewBox="0 0 16 16" className="h-3 w-3 shrink-0 text-slate-700" aria-hidden>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        d="M8 2v12M2.5 5.2l11 5.6M2.5 10.8l11-5.6"
-      />
-    </svg>
-  )
-}
-
-function InlineStat({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="inline-flex items-center gap-1.5">
-      {icon}
-      <span className="text-slate-500">{label}</span>
-      <span className="font-semibold text-slate-800">{value}</span>
     </div>
   )
 }

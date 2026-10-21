@@ -70,6 +70,20 @@ export interface Route {
   checkpoints: Checkpoint[]
   geometry: { type: 'LineString'; coordinates: [number, number][] }
   corridor_seeds: [number, number][]
+  weather_path?: WeatherPathSample[]
+}
+
+export interface WeatherPathSample {
+  t: number
+  mile: number
+  lat: number
+  lon: number
+  level: RiskDisplaySlug
+  score: number
+  driver: RiskDriver | 'none'
+  wind: number | null
+  rain: number | null
+  snow: number | null
 }
 
 export interface RankingEntry {
@@ -90,6 +104,7 @@ export interface PlanResponse {
     departure: string
     load_lb: number
     interval_miles: number
+    demo_scenario?: '' | 'load_wind'
   }
   provider: {
     routing: string
@@ -106,6 +121,20 @@ export interface PlanResponse {
   }
 }
 
+export interface WxFillProperties {
+  hour: number
+  metric: 'wind' | 'rain' | 'snow' | 'risk'
+  band: number
+  near: 0 | 1
+}
+
+export interface WeatherRaster {
+  id: string
+  hours: number
+  coordinates: [[number, number], [number, number], [number, number], [number, number]]
+  url: string
+}
+
 export interface CorridorResponse {
   anchor: string
   hours: string[]
@@ -119,6 +148,10 @@ export interface CorridorResponse {
   temperature?: (number | null)[][]
   max_score: number
   load_lb: number
+  fill?: { type: 'FeatureCollection'; features: Array<{ properties?: WxFillProperties }> }
+  arrows?: { type: 'FeatureCollection'; features: Array<{ properties?: { hour: number; windDir: number; wind: number } }> }
+  mask?: { type: 'FeatureCollection'; features: Array<Record<string, unknown>> }
+  raster?: WeatherRaster
 }
 
 export interface WeatherMapResponse {

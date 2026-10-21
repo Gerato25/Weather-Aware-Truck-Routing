@@ -1,0 +1,67 @@
+.map-route-card {
+  pointer-events: auto;
+  min-width: 7.5rem;
+  max-width: 11.5rem;
+  padding: 6px 8px 7px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+  text-align: left;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.map-route-card.is-full {
+  min-width: 10.5rem;
+  max-width: 13rem;
+  padding: 8px 10px 9px;
+}
+
+.map-route-card.is-selected {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25), 0 8px 18px rgba(15, 23, 42, 0.14);
+}
+
+.map-route-card-kicker {
+  margin: 0 0 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #047857;
+}
+
+.map-route-card-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.map-route-card-line,
+.map-route-card-risk {
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #475569;
+}
+
+.map-route-card-risk {
+  color: #b45309;
+  font-weight: 600;
+}
+
+[data-theme='dark'] .map-route-card {
+  background: rgba(15, 23, 42, 0.94);
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .map-route-card-line,
+[data-theme='dark'] .map-route-card-risk {
+  color: #cbd5e1;
+}
+
+[data-theme='dark'] .map-route-card-kicker {
+  color: #6ee7b7;
+}

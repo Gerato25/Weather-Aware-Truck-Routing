@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, CloudRain, Snowflake, Thermometer, Wind } from 'lucide-react'
 
-import { corridorSampleAt } from '../../lib/corridorHour'
 import {
   compassFromDeg,
   formatEtaRelative,
@@ -22,10 +21,6 @@ interface CheckpointDetailsProps {
   destination: string
   loadLb: number
   departure: string
-  heatHour: number
-  overlayAt: string | null
-  locationForecast: ReturnType<typeof corridorSampleAt>
-  corridorLoading: boolean
 }
 
 const METER_WIDTH: Record<RiskDisplaySlug, number> = {
@@ -65,13 +60,6 @@ function badgeLabel(level: RiskDisplaySlug): string {
   return `${RISK_LABELS[level]} Risk`
 }
 
-function overlayHasValues(forecast: ReturnType<typeof corridorSampleAt>): boolean {
-  if (!forecast) return false
-  return [forecast.wind, forecast.rain, forecast.snow, forecast.temp].some(
-    (value) => value != null && Number.isFinite(value),
-  )
-}
-
 export function CheckpointDetails({
   route,
   routeIndex,
@@ -80,10 +68,6 @@ export function CheckpointDetails({
   destination,
   loadLb,
   departure,
-  heatHour,
-  overlayAt,
-  locationForecast,
-  corridorLoading,
 }: CheckpointDetailsProps) {
   const weather = checkpoint.weather
   const relative = etaOffset(checkpoint.eta, departure)
@@ -170,48 +154,6 @@ export function CheckpointDetails({
         </div>
       </div>
 
-      <div className="mt-5">
-        <h3 className="text-[13px] font-semibold text-slate-900">Map overlay at this location</h3>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          Slider +{heatHour}h
-          {overlayAt ? ` · ${formatForecastStamp(overlayAt)}` : ''} — does not replace ETA weather
-        </p>
-
-        {corridorLoading && !locationForecast ? (
-          <p className="mt-3 text-[12px] text-slate-500">Loading corridor forecast…</p>
-        ) : overlayHasValues(locationForecast) ? (
-          <dl className="mt-3 space-y-2">
-            <ConditionRow
-              icon={<Wind className="h-4 w-4" />}
-              label="Wind"
-              value={`${formatWeather(locationForecast?.wind, 0, ' mph')}${
-                locationForecast?.windDir != null
-                  ? ` ${compassFromDeg(locationForecast.windDir) ?? ''}`
-                  : ''
-              }`}
-            />
-            <ConditionRow
-              icon={<CloudRain className="h-4 w-4" />}
-              label="Rain"
-              value={formatWeather(locationForecast?.rain, 2, ' in/hr')}
-            />
-            <ConditionRow
-              icon={<Snowflake className="h-4 w-4" />}
-              label="Snow"
-              value={formatWeather(locationForecast?.snow, 1, ' in/hr')}
-            />
-            <ConditionRow
-              icon={<Thermometer className="h-4 w-4" />}
-              label="Temperature"
-              value={formatWeather(locationForecast?.temp, 0, '°F')}
-            />
-          </dl>
-        ) : (
-          <p className="mt-3 text-[12px] text-amber-800">
-            Overlay forecast is unavailable for this hour at this location.
-          </p>
-        )}
-      </div>
     </div>
   )
 }
@@ -230,26 +172,6 @@ function WeatherTile({
       <dt className="cp-tile-icon">{icon}</dt>
       <dd className="mt-1 text-[11px] font-semibold leading-tight text-slate-900">{value}</dd>
       <p className="mt-0.5 text-[10px] text-slate-500">{hint}</p>
-    </div>
-  )
-}
-
-function ConditionRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[13px]">
-      <dt className="inline-flex items-center gap-2 text-slate-500">
-        <span className="cp-cond-icon">{icon}</span>
-        {label}
-      </dt>
-      <dd className="font-medium text-slate-800">{value}</dd>
     </div>
   )
 }

@@ -1,0 +1,99 @@
+.dest-marker {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.dest-pin {
+  position: relative;
+  width: 28px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.dest-pin-pulse {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.35);
+  animation: dest-pulse 1.8s ease-out infinite;
+}
+
+.dest-marker.is-arrived .dest-pin-pulse {
+  background: rgba(34, 197, 94, 0.35);
+}
+
+.dest-pin-flag {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.35));
+}
+
+.dest-card {
+  margin-bottom: 12px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #fecaca;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.16);
+}
+
+.dest-marker.is-arrived .dest-card {
+  border-color: #86efac;
+  background: #ecfdf5;
+}
+
+.dest-card-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  white-space: nowrap;
+}
+
+.dest-marker.is-arrived .dest-card-title {
+  color: #15803d;
+}
+
+@keyframes dest-pulse {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+[data-theme='dark'] .dest-card {
+  background: #0f172a;
+  border-color: #7f1d1d;
+}
+
+[data-theme='dark'] .dest-marker.is-arrived .dest-card {
+  background: #052e16;
+  border-color: #166534;
+}
+
+[data-theme='dark'] .dest-card-title {
+  color: #fca5a5;
+}
+
+[data-theme='dark'] .dest-marker.is-arrived .dest-card-title {
+  color: #86efac;
+}

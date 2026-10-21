@@ -33,7 +33,10 @@ from .http import UpstreamError
 from .providers.base import Place, RawRoute
 from .providers.registry import get_fallback_router, get_router
 from .risk import RiskLevel, RiskAssessment, WeatherSample, assess
-from .weather.open_meteo import OpenMeteoClient, PointForecast, snap
+from .weather.open_meteo import OpenMeteoClient, PointForecast, forecasts_for_request, snap
+from .weather.storms import DemoScenario, build_demo_scenario
+
+TIMELINE_STEP_S = 15 * 60
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +122,7 @@ class EvaluatedRoute:
     arrival: datetime | None = None
     scored_miles: float = 0.0
     unscored_miles: float = 0.0
+    weather_path: list[dict] = field(default_factory=list)
 
     @property
     def distance_miles(self) -> float:
@@ -181,6 +185,7 @@ class EvaluatedRoute:
                 },
             },
             "checkpoints": [cp.as_dict() for cp in self.checkpoints],
+            "weather_path": self.weather_path,
         }
         if include_geometry:
             payload["geometry"] = {
@@ -288,39 +293,107 @@ def _label_routes(routes: list[EvaluatedRoute]) -> None:
         route.label = f"Route {letters[index]}" if index < len(letters) else f"Route {index + 1}"
 
 
-DEMO_LOAD_WIND_MPH = 40.0  # 35–44 mph band; >40,000 lb load escalates to Severe.
-
-
-def _inject_demo_load_wind(
+def _apply_demo_scenario(
     routes: list[EvaluatedRoute],
+    departure: datetime,
     load_lb: float,
     wind_metric: str,
-) -> None:
-    """Put 40 mph wind on the middle of Route A so the 42k lb load rule is visible."""
+) -> DemoScenario | None:
+    """Score every checkpoint from the moving storms so dots match the area."""
     if not routes:
-        return
-    target = routes[0]
-    count = len(target.checkpoints)
-    if count < 3:
-        span = target.checkpoints
-    else:
-        start = max(1, count // 4)
-        end = max(start + 1, (count * 3) // 4)
-        span = target.checkpoints[start:end]
-    for evaluated in span:
-        evaluated.sample = WeatherSample(
-            wind_mph=DEMO_LOAD_WIND_MPH,
-            wind_gust_mph=DEMO_LOAD_WIND_MPH,
-            # From the north: a crosswind on the typical Chicago–Denver haul.
-            wind_dir_deg=0.0 if evaluated.sample.wind_dir_deg is None else evaluated.sample.wind_dir_deg,
-            rain_in_hr=evaluated.sample.rain_in_hr if evaluated.sample.rain_in_hr is not None else 0.0,
-            snow_in_hr=evaluated.sample.snow_in_hr if evaluated.sample.snow_in_hr is not None else 0.0,
-            temperature_f=evaluated.sample.temperature_f,
-            visibility_mi=evaluated.sample.visibility_mi,
-            weather_code=evaluated.sample.weather_code,
+        return None
+    scenario = build_demo_scenario([list(route.raw.coords) for route in routes])
+    for route in routes:
+        for evaluated in route.checkpoints:
+            eta_hours = (evaluated.eta - departure).total_seconds() / 3600.0
+            evaluated.sample = scenario.sample(
+                evaluated.checkpoint.lat, evaluated.checkpoint.lon, eta_hours
+            )
+            evaluated.assessment = assess(evaluated.sample, load_lb, wind_metric)
+        _aggregate(route)
+    return scenario
+
+
+def _forecast_near(
+    coord: Coord,
+    checkpoints: list[EvaluatedCheckpoint],
+    forecasts: dict[Coord, PointForecast],
+) -> PointForecast | None:
+    direct = forecasts.get(snap(coord))
+    if direct is not None:
+        return direct
+    nearest: PointForecast | None = None
+    nearest_m = float("inf")
+    for evaluated in checkpoints:
+        distance = haversine_m(coord, evaluated.checkpoint.coord)
+        if distance < nearest_m:
+            nearest_m = distance
+            nearest = forecasts.get(snap(evaluated.checkpoint.coord))
+    return nearest
+
+
+def _weather_path(
+    route: EvaluatedRoute,
+    departure: datetime,
+    load_lb: float,
+    wind_metric: str,
+    scenario: DemoScenario | None,
+    forecasts: dict[Coord, PointForecast],
+) -> list[dict]:
+    """Risk at the truck every 15 minutes, same source as the checkpoint dots."""
+    profile = route.raw.profile
+    duration_s = max(0.0, profile.total_s)
+    samples: list[dict] = []
+    t = 0.0
+    while t < duration_s - 1.0:
+        coord, distance_m = profile.at_time(t)
+        hour = t / 3600.0
+        eta = departure + timedelta(seconds=t)
+        if scenario is not None:
+            sample = scenario.sample(coord[1], coord[0], hour)
+        else:
+            forecast = _forecast_near(coord, route.checkpoints, forecasts)
+            sample = forecast.sample_at(eta.timestamp()) if forecast else WeatherSample()
+        result = assess(sample, load_lb, wind_metric)
+        samples.append(
+            {
+                "t": round(hour, 2),
+                "mile": round(meters_to_miles(distance_m), 1),
+                "lat": round(coord[1], 5),
+                "lon": round(coord[0], 5),
+                "level": result.level.slug if result.available else "UNKNOWN",
+                "score": result.score if result.available else -1,
+                "driver": result.driver if result.available else "none",
+                "wind": None if sample.wind_mph is None else round(sample.wind_mph, 1),
+                "rain": None if sample.rain_in_hr is None else round(sample.rain_in_hr, 3),
+                "snow": None if sample.snow_in_hr is None else round(sample.snow_in_hr, 2),
+            }
         )
-        evaluated.assessment = assess(evaluated.sample, load_lb, wind_metric)
-    _aggregate(target)
+        t += TIMELINE_STEP_S
+    coord, distance_m = profile.at_time(duration_s)
+    hour = duration_s / 3600.0
+    eta = departure + timedelta(seconds=duration_s)
+    if scenario is not None:
+        sample = scenario.sample(coord[1], coord[0], hour)
+    else:
+        forecast = _forecast_near(coord, route.checkpoints, forecasts)
+        sample = forecast.sample_at(eta.timestamp()) if forecast else WeatherSample()
+    result = assess(sample, load_lb, wind_metric)
+    samples.append(
+        {
+            "t": round(hour, 2),
+            "mile": round(meters_to_miles(distance_m), 1),
+            "lat": round(coord[1], 5),
+            "lon": round(coord[0], 5),
+            "level": result.level.slug if result.available else "UNKNOWN",
+            "score": result.score if result.available else -1,
+            "driver": result.driver if result.available else "none",
+            "wind": None if sample.wind_mph is None else round(sample.wind_mph, 1),
+            "rain": None if sample.rain_in_hr is None else round(sample.rain_in_hr, 3),
+            "snow": None if sample.snow_in_hr is None else round(sample.snow_in_hr, 2),
+        }
+    )
+    return samples
 
 
 # --- scoring ---------------------------------------------------------------
@@ -353,6 +426,10 @@ def _aggregate(route: EvaluatedRoute) -> None:
     route.max_level = max(scored_levels, default=RiskLevel.LOW)
 
 
+def _severe_plus_miles(route: EvaluatedRoute) -> float:
+    return route.miles(RiskLevel.NO_TRAVEL) + route.miles(RiskLevel.SEVERE)
+
+
 def _recommendation_reasons(best: EvaluatedRoute, others: list[EvaluatedRoute]) -> list[str]:
     reasons: list[str] = []
     if best.blocked:
@@ -361,8 +438,29 @@ def _recommendation_reasons(best: EvaluatedRoute, others: list[EvaluatedRoute]) 
         )
 
     runner_up = min(others, key=lambda r: r.ranking_key()) if others else None
+    elevated_plus = [route for route in others if _severe_plus_miles(route) > 0.5]
+    if _severe_plus_miles(best) <= 0.5 and elevated_plus and len(elevated_plus) == len(others):
+        reasons.append("Only route with no Severe or No Travel miles.")
+    elif _severe_plus_miles(best) <= 0.5 and elevated_plus:
+        names = ", ".join(route.label for route in elevated_plus)
+        reasons.append(f"Avoids Severe and No Travel conditions on {names}.")
+    else:
+        blocked_others = [route for route in others if route.miles(RiskLevel.NO_TRAVEL) > 0]
+        severe_others = [
+            route
+            for route in others
+            if route.miles(RiskLevel.NO_TRAVEL) <= 0 and route.miles(RiskLevel.SEVERE) > 0.5
+        ]
+        parts: list[str] = []
+        if best.miles(RiskLevel.NO_TRAVEL) == 0 and blocked_others:
+            parts.append(f"No Travel on {', '.join(route.label for route in blocked_others)}")
+        if severe_others:
+            parts.append(f"Severe weather on {', '.join(route.label for route in severe_others)}")
+        if parts:
+            reasons.append("Avoids " + " and ".join(parts) + ".")
     if runner_up is None:
-        reasons.append("Only one viable route was found.")
+        if not reasons:
+            reasons.append("Only one viable route was found.")
         return reasons
 
     severe_best = round(best.miles(RiskLevel.SEVERE), 1)
@@ -450,9 +548,13 @@ def plan_trip(
     # One weather round trip for every checkpoint on every route.
     latest_eta = max(cp.eta for route in routes for cp in route.checkpoints)
     client = weather_client or OpenMeteoClient()
-    forecast_days = client.forecast_days_for(latest_eta)
     all_coords = [cp.checkpoint.coord for route in routes for cp in route.checkpoints]
-    forecasts: dict[Coord, PointForecast] = client.forecasts(all_coords, forecast_days)
+    forecasts, weather_fallback = forecasts_for_request(
+        client, all_coords, latest_eta, request.demo_scenario
+    )
+    demo_scenario = request.demo_scenario
+    if weather_fallback:
+        demo_scenario = "load_wind"
 
     wind_metric = settings.WIND_RISK_METRIC
     for route in routes:
@@ -465,8 +567,14 @@ def plan_trip(
         route.arrival = request.departure + timedelta(seconds=route.raw.duration_s)
         _aggregate(route)
 
-    if request.demo_scenario == "load_wind":
-        _inject_demo_load_wind(routes, request.load_lb, wind_metric)
+    scenario = None
+    if demo_scenario == "load_wind":
+        scenario = _apply_demo_scenario(routes, request.departure, request.load_lb, wind_metric)
+
+    for route in routes:
+        route.weather_path = _weather_path(
+            route, request.departure, request.load_lb, wind_metric, scenario, forecasts
+        )
 
     _label_routes(routes)
     ranked = sorted(routes, key=lambda r: r.ranking_key())
@@ -480,12 +588,12 @@ def plan_trip(
             "departure": request.departure.isoformat(),
             "load_lb": request.load_lb,
             "interval_miles": request.interval_miles,
-            "demo_scenario": request.demo_scenario,
+            "demo_scenario": demo_scenario,
         },
         "provider": {
             "routing": router.name,
             "truck_profile": getattr(router, "supports_truck_profile", False),
-            "weather": client.name,
+            "weather": "demo-fallback" if weather_fallback else client.name,
             "wind_metric": wind_metric,
         },
         "routes": [route.as_dict() for route in routes],

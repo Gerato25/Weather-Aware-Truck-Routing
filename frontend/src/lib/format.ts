@@ -27,6 +27,24 @@ export function formatEta(iso: string | null): string {
   })
 }
 
+/** Clock time without the zone, for tight tables that put the zone in the header. */
+export function formatEtaClock(iso: string | null): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+export function formatTimeZoneShort(iso?: string | null): string {
+  const stamp = iso ? new Date(iso) : new Date()
+  if (Number.isNaN(stamp.getTime())) return ''
+  const part = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+    .formatToParts(stamp)
+    .find((item) => item.type === 'timeZoneName')
+  return part?.value ?? ''
+}
+
 export function formatEtaRelative(iso: string | null, fromIso?: string | null): string | null {
   if (!iso) return null
   const originMs = fromIso ? new Date(fromIso).getTime() : Date.now()

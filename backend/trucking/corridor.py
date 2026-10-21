@@ -8,20 +8,29 @@ instead of refetching on every tick.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 
 from .geo import Coord, initial_bearing_deg, miles_to_meters, offset_coord
-from .risk import RiskLevel, WeatherSample, assess
-from .weather.open_meteo import OpenMeteoClient, PointForecast, snap
+from .risk import RiskLevel, assess
+from .weather.open_meteo import OpenMeteoClient, PointForecast, forecasts_for_request, snap
+from .weather.storms import build_demo_scenario
 
 # Lateral offsets from the route centreline, which give the heatmap a corridor
 # with width rather than a thin line of points.
-LATERAL_OFFSETS_MILES = (-30.0, 0.0, 30.0)
-MAX_CORRIDOR_POINTS = 240
+LATERAL_OFFSETS_MILES = (-20.0, -10.0, 0.0, 10.0, 20.0)
+MAX_CORRIDOR_POINTS = 400
 DEFAULT_HOURS = 48
+
+
+@dataclass(frozen=True)
+class DemoStormPoint:
+    lon: float
+    lat: float
+    wind_mph: float
+    wind_dir_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -31,9 +40,8 @@ class CorridorRequest:
     anchor: datetime
     hours: int = DEFAULT_HOURS
     demo_scenario: str = ""
-
-
-DEMO_LOAD_WIND_MPH = 40.0
+    demo_storm: tuple[DemoStormPoint, ...] = ()
+    route_lines: tuple[tuple[Coord, ...], ...] = ()
 
 
 def _thin(seeds: list[Coord], max_points: int) -> list[Coord]:
@@ -95,15 +103,31 @@ def build_heatmap(
             "wind_dir": [],
             "rain": [],
             "snow": [],
+            "fill": {"type": "FeatureCollection", "features": []},
+            "arrows": {"type": "FeatureCollection", "features": []},
+            "mask": {"type": "FeatureCollection", "features": []},
+            "raster": None,
         }
 
     # Align the series to the top of the hour so every point shares a time axis.
     anchor = request.anchor.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
     timestamps = [anchor + timedelta(hours=h) for h in range(hours + 1)]
 
+    scenario = None
+    if request.demo_scenario == "load_wind":
+        lines = [list(line) for line in request.route_lines if len(line) >= 2]
+        scenario = build_demo_scenario(lines or [request.seeds])
+
     client = weather_client or OpenMeteoClient()
-    forecast_days = client.forecast_days_for(timestamps[-1])
-    forecasts: dict[Coord, PointForecast] = client.forecasts(points, forecast_days)
+    forecasts: dict[Coord, PointForecast] = {}
+    if scenario is None:
+        forecasts, weather_fallback = forecasts_for_request(
+            client, points, timestamps[-1], request.demo_scenario
+        )
+        if weather_fallback:
+            lines = [list(line) for line in request.route_lines if len(line) >= 2]
+            scenario = build_demo_scenario(lines or [request.seeds])
+            request = replace(request, demo_scenario="load_wind")
 
     wind_metric = settings.WIND_RISK_METRIC
     risk_grid: list[list[int]] = []
@@ -116,8 +140,8 @@ def build_heatmap(
     kept_points: list[list[float]] = []
 
     for point in points:
-        forecast = forecasts.get(snap(point))
-        if forecast is None or not forecast.times:
+        forecast = None if scenario else forecasts.get(snap(point))
+        if scenario is None and (forecast is None or not forecast.times):
             continue
 
         risk_row: list[int] = []
@@ -127,8 +151,12 @@ def build_heatmap(
         rain_row: list[float] = []
         snow_row: list[float] = []
         temp_row: list[float | None] = []
-        for ts in timestamps:
-            sample = forecast.sample_at(ts.timestamp())
+        for hour, ts in enumerate(timestamps):
+            if scenario is not None:
+                sample = scenario.sample(point[1], point[0], float(hour))
+            else:
+                assert forecast is not None
+                sample = forecast.sample_at(ts.timestamp())
             result = assess(sample, request.load_lb, wind_metric)
             risk_row.append(result.score if result.available else -1)
             cause_row.append(
@@ -154,10 +182,11 @@ def build_heatmap(
         snow_grid.append(snow_row)
         temp_grid.append(temp_row)
 
-    if request.demo_scenario == "load_wind" and kept_points:
-        _inject_demo_load_wind(
-            risk_grid, cause_grid, wind_grid, wind_dir_grid, request.load_lb, wind_metric
-        )
+    from .area import build_area_overlay
+    from .weather.raster import build_and_cache_rasters
+
+    area = build_area_overlay(request, timestamps, client)
+    raster = build_and_cache_rasters(request, timestamps, client, forecasts=forecasts)
 
     return {
         "anchor": anchor.isoformat(),
@@ -172,40 +201,8 @@ def build_heatmap(
         "temperature": temp_grid,
         "max_score": int(RiskLevel.NO_TRAVEL),
         "load_lb": request.load_lb,
+        "fill": {"type": "FeatureCollection", "features": []},
+        "arrows": area["arrows"],
+        "mask": {"type": "FeatureCollection", "features": []},
+        "raster": raster.as_dict(),
     }
-
-
-def _inject_demo_load_wind(
-    risk_grid: list[list[int]],
-    cause_grid: list[list[str]],
-    wind_grid: list[list[float]],
-    wind_dir_grid: list[list[float | None]],
-    load_lb: float,
-    wind_metric: str,
-) -> None:
-    """Paint 40 mph wind on the middle of the corridor so the heatmap matches Route A."""
-    if not risk_grid:
-        return
-    count = len(risk_grid)
-    start = max(0, count // 4)
-    end = max(start + 1, (count * 3) // 4)
-    demo = assess(
-        WeatherSample(
-            wind_mph=DEMO_LOAD_WIND_MPH,
-            wind_gust_mph=DEMO_LOAD_WIND_MPH,
-            wind_dir_deg=0.0,
-            rain_in_hr=0.0,
-            snow_in_hr=0.0,
-        ),
-        load_lb,
-        wind_metric,
-    )
-    score = demo.score if demo.available else int(RiskLevel.SEVERE)
-    hours = len(risk_grid[0])
-    for i in range(start, end):
-        for hour in range(hours):
-            risk_grid[i][hour] = score
-            cause_grid[i][hour] = "wind"
-            wind_grid[i][hour] = DEMO_LOAD_WIND_MPH
-            if wind_dir_grid[i][hour] is None:
-                wind_dir_grid[i][hour] = 0.0

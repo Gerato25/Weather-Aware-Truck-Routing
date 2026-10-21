@@ -105,21 +105,37 @@ class HeatmapTests(SimpleTestCase):
         self.assertEqual(grid["cause"][0][0], "snow")
         self.assertAlmostEqual(grid["snow"][0][0], 2.5, places=2)
 
-    def test_demo_load_wind_paints_the_middle_of_the_corridor(self):
+    def test_demo_load_wind_paints_cells_near_the_storm_points(self):
+        far_lon, far_lat = self.seeds[-1]
         grid = build_heatmap(
             CorridorRequest(
                 seeds=self.seeds,
                 load_lb=42_000.0,
                 anchor=self.anchor,
-                hours=6,
+                hours=12,
                 demo_scenario="load_wind",
+                route_lines=(tuple(self.seeds),),
             ),
             weather_client=FakeWeather(lambda lon, lat: {"wind": 5.0, "gust": 5.0}),
         )
-        mid = len(grid["points"]) // 2
-        self.assertGreaterEqual(grid["risk"][mid][0], int(RiskLevel.SEVERE))
-        self.assertEqual(grid["cause"][mid][0], "wind")
-        self.assertEqual(grid["cause"][0][0], "")
+
+        def nearest(target):
+            return min(
+                range(len(grid["points"])),
+                key=lambda i: abs(grid["points"][i][0] - target[0])
+                + abs(grid["points"][i][1] - target[1]),
+            )
+
+        mid = self.seeds[len(self.seeds) // 2]
+        near = nearest(mid)
+        far = nearest((far_lon, far_lat))
+        peak = max(range(len(grid["risk"][near])), key=lambda hour: grid["wind"][near][hour] or 0)
+        self.assertEqual(grid["risk"][near][0], int(RiskLevel.LOW))
+        self.assertGreaterEqual(grid["risk"][near][peak], int(RiskLevel.SEVERE))
+        self.assertEqual(grid["cause"][near][peak], "wind")
+        self.assertEqual(grid["wind_dir"][near][peak], 135.0)
+        self.assertEqual(grid["risk"][far][0], int(RiskLevel.LOW))
+        self.assertEqual(grid["cause"][far][0], "")
 
     def test_empty_seed_list_returns_an_empty_grid(self):
         grid = build_heatmap(

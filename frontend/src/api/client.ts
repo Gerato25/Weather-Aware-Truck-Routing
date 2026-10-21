@@ -27,11 +27,19 @@ function describeError(status: number, body: unknown): string {
     return 'The planning API is not on this Vercel app. Deploy Django (Render) and set VITE_API_BASE_URL to that origin, then rebuild.'
   }
   if (typeof body === 'string' && body.trim() && body.length < 280 && !body.trim().startsWith('<')) {
+    if (/daily api request limit|limit exceeded/i.test(body)) {
+      return 'Open-Meteo daily limit exceeded. Check Demo weather and Analyze — local storms will run until the quota resets.'
+    }
     return body
   }
   if (body && typeof body === 'object') {
     const record = body as Record<string, unknown>
-    if (typeof record.detail === 'string') return record.detail
+    if (typeof record.detail === 'string') {
+      if (/daily api request limit|limit exceeded/i.test(record.detail)) {
+        return 'Open-Meteo daily limit exceeded. Check Demo weather and Analyze — local storms will run until the quota resets.'
+      }
+      return record.detail
+    }
 
     // Field errors arrive as {"field": ["message", ...]}.
     const parts: string[] = []
@@ -104,6 +112,7 @@ export function fetchCorridor(
     anchor: string
     hours: number
     demo_scenario?: '' | 'load_wind'
+    route_lines?: [number, number][][]
   },
   signal?: AbortSignal,
 ): Promise<CorridorResponse> {

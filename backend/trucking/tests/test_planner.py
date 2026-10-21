@@ -11,6 +11,7 @@ from trucking.planner import (
     plan_trip,
     shared_fraction,
 )
+from trucking.http import UpstreamError
 from trucking.providers.base import Place
 from trucking.risk import RiskLevel
 from trucking.weather.open_meteo import PointForecast, snap
@@ -175,7 +176,8 @@ class AggregationTests(SimpleTestCase):
         router = FakeRouter(
             [
                 make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 10.0),
-                make_route((-100.0, 40.2), (-90.0, 40.2), 620.0, 12.0),
+                make_route((-100.0, 39.35), (-90.0, 39.35), 620.0, 12.0),
+                make_route((-100.0, 38.65), (-90.0, 38.65), 640.0, 13.0),
             ]
         )
         weather = FakeWeather(still)
@@ -187,14 +189,57 @@ class AggregationTests(SimpleTestCase):
             weather_client=weather,
             router=router,
         )
-        route_a = demo["routes"][0]
-        self.assertGreater(route_a["summary"]["miles_by_level"]["SEVERE"], 10)
-        severe = next(cp for cp in route_a["checkpoints"] if cp["risk"]["level"] == "SEVERE")
-        self.assertEqual(severe["risk"]["driver"], "wind")
-        self.assertIsNotNone(severe["weather"]["wind_dir_deg"])
+        route_a, route_b, route_c = demo["routes"]
+        self.assertGreater(route_a["summary"]["miles_by_level"]["NO_TRAVEL"], 0)
+        self.assertGreater(route_b["summary"]["miles_by_level"]["SEVERE"], 0)
+        self.assertGreater(route_c["summary"]["miles_by_level"]["SEVERE"], 0)
+
+        no_travel = next(cp for cp in route_a["checkpoints"] if cp["risk"]["level"] == "NO_TRAVEL")
+        self.assertEqual(no_travel["risk"]["driver"], "wind")
+        self.assertEqual(no_travel["weather"]["wind_dir_deg"], 135.0)
+
+        rain = [cp for cp in route_b["checkpoints"] if cp["risk"]["driver"] == "rain"]
+        snow = [cp for cp in route_c["checkpoints"] if cp["risk"]["driver"] == "snow"]
+        self.assertGreaterEqual(len(rain), 1)
+        self.assertGreaterEqual(len(snow), 1)
+        self.assertTrue(any(cp["risk"]["level"] == "SEVERE" for cp in rain))
+        self.assertTrue(any(cp["risk"]["level"] == "SEVERE" for cp in snow))
+
         self.assertEqual(demo["recommendation"]["route_id"], "route-2")
         self.assertEqual(demo["recommendation"]["label"], "Route B")
-        self.assertTrue(any("Route A" in reason for reason in demo["recommendation"]["reasons"]))
+        self.assertTrue(
+            any(
+                "Severe" in reason and "No Travel" in reason
+                for reason in demo["recommendation"]["reasons"]
+            )
+        )
+
+    def test_daily_weather_limit_falls_back_to_demo_storms(self):
+        class LimitWeather:
+            name = "open-meteo"
+
+            def forecast_days_for(self, latest):
+                return 3
+
+            def forecasts(self, coords, forecast_days=3):
+                raise UpstreamError(
+                    "Open-Meteo returned 429: Daily API request limit exceeded.",
+                    provider="Open-Meteo",
+                    status=429,
+                )
+
+        router = FakeRouter(
+            [
+                make_route((-100.0, 40.0), (-90.0, 40.0), 600.0, 10.0),
+                make_route((-100.0, 39.35), (-90.0, 39.35), 620.0, 12.0),
+                make_route((-100.0, 38.65), (-90.0, 38.65), 640.0, 13.0),
+            ]
+        )
+        payload = plan_trip(trip(load_lb=42_000), weather_client=LimitWeather(), router=router)
+        self.assertEqual(payload["provider"]["weather"], "demo-fallback")
+        self.assertEqual(payload["request"]["demo_scenario"], "load_wind")
+        self.assertEqual(payload["recommendation"]["label"], "Route B")
+        self.assertGreater(payload["routes"][0]["summary"]["miles_by_level"]["NO_TRAVEL"], 0)
 
     def test_recommendation_prefers_fewer_severe_miles_over_speed(self):
         payload = self.plan()
@@ -235,6 +280,15 @@ class AggregationTests(SimpleTestCase):
         self.assertEqual(route["geometry"]["type"], "LineString")
         self.assertGreaterEqual(len(route["geometry"]["coordinates"]), 2)
         self.assertGreaterEqual(len(route["corridor_seeds"]), 2)
+
+    def test_weather_path_samples_every_15_minutes(self):
+        route = self.plan()["routes"][0]
+        path = route["weather_path"]
+        self.assertGreaterEqual(len(path), 4)
+        self.assertEqual(path[0]["t"], 0)
+        self.assertAlmostEqual(path[1]["t"] - path[0]["t"], 0.25, places=2)
+        self.assertAlmostEqual(path[-1]["t"], route["summary"]["duration_hours"], places=1)
+        self.assertIn(path[0]["level"], {"LOW", "MODERATE", "HIGH", "SEVERE", "NO_TRAVEL", "UNKNOWN"})
 
     def test_weather_is_requested_once_per_grid_cell(self):
         weather = FakeWeather(calm)

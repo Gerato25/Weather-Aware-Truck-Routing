@@ -11,7 +11,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
-from .corridor import CorridorRequest, build_heatmap
+from .corridor import CorridorRequest, DemoStormPoint, build_heatmap
 from .http import UpstreamError
 from .planner import TripRequest, plan_trip
 from .providers.base import Place
@@ -33,8 +33,14 @@ def api_exception_handler(exc, context):
     """Turn upstream provider failures into a 502 the UI can display."""
     if isinstance(exc, UpstreamError):
         logger.warning("Upstream failure from %s: %s", exc.provider or "?", exc)
+        detail = str(exc)
+        if exc.status == 429 or ("limit" in detail.lower() and "exceeded" in detail.lower()):
+            detail = (
+                "Open-Meteo daily limit exceeded. Check Demo weather and Analyze — "
+                "local storms will run until the quota resets."
+            )
         return Response(
-            {"detail": str(exc), "provider": exc.provider},
+            {"detail": detail, "provider": exc.provider},
             status=status.HTTP_502_BAD_GATEWAY,
         )
     return exception_handler(exc, context)
@@ -120,6 +126,16 @@ def corridor(request):
             anchor=data.get("anchor") or datetime.now(timezone.utc),
             hours=data["hours"],
             demo_scenario=data.get("demo_scenario") or "",
+            demo_storm=tuple(
+                DemoStormPoint(
+                    lon=cell["lon"],
+                    lat=cell["lat"],
+                    wind_mph=cell["wind_mph"],
+                    wind_dir_deg=cell.get("wind_dir_deg"),
+                )
+                for cell in data.get("demo_storm") or ()
+            ),
+            route_lines=tuple(tuple(line) for line in data.get("route_lines") or ()),
         )
     )
     return Response(heatmap)

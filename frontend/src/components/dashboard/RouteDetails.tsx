@@ -3,9 +3,10 @@ import { CheckCircle2 } from 'lucide-react'
 import type { CheckpointRef } from '../MapView'
 import {
   formatDuration,
-  formatEta,
+  formatEtaClock,
   formatMiles,
   formatRiskScore,
+  formatTimeZoneShort,
   formatWeather,
   shortPlaceName,
 } from '../../lib/format'
@@ -148,12 +149,13 @@ export function RouteDetails({
   const origin = plan?.request.origin.label ?? ''
   const destination = plan?.request.destination.label ?? ''
   const tight = compact || embedded
+  const etaZone = formatTimeZoneShort(selected?.checkpoints[0]?.eta)
 
   return (
     <section
       className={
         embedded
-          ? 'flex min-h-0 shrink-0 flex-col border-t border-slate-100'
+          ? 'flex min-h-0 flex-1 flex-col overflow-hidden border-t border-slate-100'
           : `flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm ${
               compact ? 'dash-drawer' : 'rounded-2xl'
             }`
@@ -210,19 +212,21 @@ export function RouteDetails({
           <div
             className={`dash-table-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-slate-100 ${
               embedded
-                ? 'mx-2 mb-2 mt-1 max-h-64'
+                ? 'is-embedded mx-2 mb-2 mt-1'
                 : compact
                   ? 'mx-2 mb-2 mt-2 max-h-none'
                   : 'mx-4 my-3 max-h-72'
             }`}
           >
-            <table className={`w-full text-left ${embedded ? 'text-[11px]' : tight ? 'min-w-[640px] text-[12px]' : 'min-w-[720px] text-[13px]'}`}>
-              <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            <table className={`w-full text-left ${embedded ? 'table-fixed text-[11px]' : tight ? 'min-w-[640px] text-[12px]' : 'min-w-[720px] text-[13px]'}`}>
+              <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-semibold uppercase tracking-normal text-slate-500">
                 <tr>
-                  <th className="px-2 py-2">Checkpoint</th>
-                  <th className="px-2 py-2">Dist</th>
-                  <th className="px-2 py-2">ETA</th>
-                  <th className="px-2 py-2">Risk</th>
+                  <th className={`${embedded ? 'w-[48%] pl-3 pr-1 py-2' : 'px-2 py-2'}`}>Checkpoint</th>
+                  <th className={`${embedded ? 'w-8 px-1 py-2' : 'px-2 py-2'}`}>{embedded ? 'mi' : 'Dist'}</th>
+                  <th className={`${embedded ? 'w-[5.25rem] px-1 py-2' : 'px-2 py-2'}`}>
+                    ETA{etaZone ? <span className="normal-case"> ({etaZone})</span> : ''}
+                  </th>
+                  <th className={`${embedded ? 'w-[3.6rem] px-1 py-2' : 'px-2 py-2'}`}>Risk</th>
                   {!embedded && (
                     <>
                       <th className="px-3 py-2.5">Wind</th>
@@ -252,7 +256,7 @@ export function RouteDetails({
                         onFocusCheckpoint({ routeId: selected.id, index: checkpoint.index })
                       }
                     >
-                      <td className="px-2 py-1.5 font-medium text-slate-800">
+                      <td className={`${embedded ? 'pl-3 pr-2' : 'px-2'} py-1.5 font-medium text-slate-800`}>
                         <span className="inline-flex items-center gap-1.5">
                           <i
                             className="h-2 w-2 shrink-0 rounded-full"
@@ -261,13 +265,14 @@ export function RouteDetails({
                           {checkpointLabel(selected, checkpoint, origin, destination)}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-slate-700">
-                        {Math.round(checkpoint.mile)} mi
+                      <td className={`whitespace-nowrap py-1.5 text-slate-700 ${embedded ? 'px-1' : 'px-2'}`}>
+                        {Math.round(checkpoint.mile)}
+                        {embedded ? '' : ' mi'}
                       </td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-slate-700">
-                        {formatEta(checkpoint.eta)}
+                      <td className={`whitespace-nowrap py-1.5 tabular-nums text-slate-700 ${embedded ? 'px-1' : 'px-2'}`}>
+                        {formatEtaClock(checkpoint.eta)}
                       </td>
-                      <td className="px-2 py-1.5">
+                      <td className={`py-1.5 ${embedded ? 'px-1' : 'px-2'}`}>
                         <CompactRiskBadge level={checkpoint.risk.level} />
                       </td>
                       {!embedded && (
@@ -310,7 +315,7 @@ function CompactRiskBadge({ level }: { level: RiskDisplaySlug }) {
   const style = BADGE_STYLE[level]
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none"
+      className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
       style={style}
     >
       {RISK_LABELS[level]}

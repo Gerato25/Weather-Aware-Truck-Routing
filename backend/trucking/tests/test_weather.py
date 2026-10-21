@@ -1,12 +1,13 @@
 """Open-Meteo client retries 429s instead of failing the plan immediately."""
 
+from datetime import datetime, timezone
 from unittest import mock
 
 from django.core.cache import cache
 from django.test import SimpleTestCase
 
 from trucking.http import UpstreamError
-from trucking.weather.open_meteo import OpenMeteoClient, PointForecast
+from trucking.weather.open_meteo import OpenMeteoClient, PointForecast, calm_forecasts, forecasts_for_request
 
 
 def _series(count: int = 4) -> dict:
@@ -53,6 +54,54 @@ class OpenMeteoRetryTests(SimpleTestCase):
                 with self.assertRaises(UpstreamError) as raised:
                     client.forecasts([(-87.63, 41.88)], forecast_days=2)
         self.assertEqual(raised.exception.status, 429)
+
+    def test_daily_limit_429_is_not_retried(self):
+        client = OpenMeteoClient()
+        busy = UpstreamError(
+            "Open-Meteo returned 429: Daily API request limit exceeded. Please try again tomorrow.",
+            provider="Open-Meteo",
+            status=429,
+        )
+        with mock.patch(
+            "trucking.weather.open_meteo.request_json",
+            side_effect=busy,
+        ) as request:
+            with self.assertRaises(UpstreamError) as raised:
+                client.forecasts([(-87.63, 41.88)], forecast_days=2)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(raised.exception.status, 429)
+
+    def test_demo_mode_does_not_call_open_meteo(self):
+        client = OpenMeteoClient()
+        with mock.patch("trucking.weather.open_meteo.request_json") as request:
+            result, fallback = forecasts_for_request(
+                client,
+                [(-87.63, 41.88)],
+                latest=datetime.now(timezone.utc),
+                demo_scenario="load_wind",
+            )
+        request.assert_not_called()
+        self.assertFalse(fallback)
+        sample = next(iter(result.values())).sample_at(datetime.now(timezone.utc).timestamp())
+        self.assertAlmostEqual(sample.wind_mph, 8.0, places=1)
+        self.assertTrue(calm_forecasts([(-87.63, 41.88)]))
+
+    def test_daily_limit_falls_back_to_local_weather(self):
+        client = OpenMeteoClient()
+        busy = UpstreamError(
+            "Open-Meteo returned 429: Daily API request limit exceeded. Please try again tomorrow.",
+            provider="Open-Meteo",
+            status=429,
+        )
+        with mock.patch("trucking.weather.open_meteo.request_json", side_effect=busy):
+            result, fallback = forecasts_for_request(
+                client,
+                [(-87.63, 41.88)],
+                latest=datetime.now(timezone.utc),
+            )
+        self.assertTrue(fallback)
+        sample = next(iter(result.values())).sample_at(datetime.now(timezone.utc).timestamp())
+        self.assertAlmostEqual(sample.wind_mph, 8.0, places=1)
 
     def test_non_429_errors_are_not_retried(self):
         client = OpenMeteoClient()

@@ -80,6 +80,19 @@ class ProfileTests(SimpleTestCase):
         self.assertEqual(profile.at_distance(-500.0)[1], 0.0)
         self.assertEqual(profile.at_distance(1e12)[1], profile.total_s)
 
+    def test_at_time_returns_distance_along_the_route(self):
+        profile = profile_from_edge_durations(
+            straight_line(3),
+            [100.0, 100.0],
+            total_distance_m=2000.0,
+            total_duration_s=200.0,
+        )
+        coord, distance = profile.at_time(100.0)
+        self.assertAlmostEqual(distance, 1000.0, delta=5)
+        self.assertEqual(profile.at_time(-1.0)[1], 0.0)
+        self.assertAlmostEqual(profile.at_time(1e12)[1], profile.total_m, places=3)
+        self.assertEqual(coord[1], profile.coords[1][1])
+
     def test_steps_distribute_duration_across_vertices(self):
         coords = straight_line(5)
         # One step covering the whole line, 400 seconds over 4 equal edges.

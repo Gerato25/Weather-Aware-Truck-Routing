@@ -14,7 +14,7 @@ import threading
 import time
 from bisect import bisect_right
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.core.cache import cache
@@ -53,6 +53,63 @@ FORECAST_SLACK_S = 30 * 60
 # corridor heatmap that starts the moment a plan returns.
 _OPEN_METEO_GATE = threading.Lock()
 _MAX_429_RETRIES = 5
+
+
+def _is_daily_limit(exc: UpstreamError) -> bool:
+    text = str(exc).lower()
+    return exc.status == 429 and ("daily" in text or "limit exceeded" in text)
+
+
+def calm_forecasts(coords: list[Coord]) -> dict[Coord, PointForecast]:
+    """Local 8 mph / dry series so demo mode can run when Open-Meteo is exhausted."""
+    start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) - timedelta(days=1)
+    count = 24 * 8
+    times = [int((start + timedelta(hours=hour)).timestamp()) for hour in range(count)]
+    out: dict[Coord, PointForecast] = {}
+    for coord in coords:
+        key = snap(coord)
+        if key in out:
+            continue
+        out[key] = PointForecast(
+            lon=key[0],
+            lat=key[1],
+            times=times,
+            wind=[8.0] * count,
+            gust=[10.0] * count,
+            wind_dir=[270.0] * count,
+            rain=[0.0] * count,
+            snow=[0.0] * count,
+            temperature=[55.0] * count,
+            visibility=[16000.0] * count,
+            code=[0] * count,
+        )
+    return out
+
+
+def forecasts_for_request(
+    client: OpenMeteoClient,
+    coords: list[Coord],
+    latest: datetime,
+    demo_scenario: str = "",
+) -> tuple[dict[Coord, PointForecast], bool]:
+    """Fetch live weather, or a calm series for the scripted demo / daily 429s.
+
+    The boolean is True when live Open-Meteo was skipped because the daily
+    quota is exhausted. Callers should apply the demo storms and tell the UI.
+    """
+    demo = demo_scenario == "load_wind"
+    if demo and isinstance(client, OpenMeteoClient):
+        return calm_forecasts(coords), False
+    days = client.forecast_days_for(latest)
+    try:
+        return client.forecasts(coords, days), False
+    except UpstreamError as exc:
+        if _is_daily_limit(exc) or exc.status == 429:
+            logger.warning("Open-Meteo rate limit; using local demo weather")
+            return calm_forecasts(coords), True
+        raise
 
 
 def snap(coord: Coord) -> Coord:
@@ -272,7 +329,7 @@ class OpenMeteoClient:
                 return request_json("GET", self.base_url, provider="Open-Meteo", params=params)
             except UpstreamError as exc:
                 last_error = exc
-                if exc.status != 429 or attempt >= _MAX_429_RETRIES:
+                if exc.status != 429 or _is_daily_limit(exc) or attempt >= _MAX_429_RETRIES:
                     raise
                 delay = exc.retry_after if exc.retry_after and exc.retry_after > 0 else 1.5 * (2**attempt)
                 delay = min(20.0, delay)

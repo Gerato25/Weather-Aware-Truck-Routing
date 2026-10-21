@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { ApiError, fetchCorridor, planTrip, type PlanPayload } from '../api/client'
+import { mergeCorridorSeeds } from '../lib/corridorHeat'
 import { INITIAL_FORM } from '../lib/demoTrips'
 import { fromLocalInputValue } from '../lib/format'
 import { rememberTrip } from '../lib/recentTrips'
@@ -16,7 +17,7 @@ export function useTripSession() {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
   const [focused, setFocused] = useState<CheckpointRef | null>(null)
   const [corridorState, setCorridorState] = useState<{
-    routeId: string
+    planId: string
     data: CorridorResponse | null
   } | null>(null)
   const [heatHour, setHeatHour] = useState(0)
@@ -45,8 +46,8 @@ export function useTripSession() {
     [plan, selectedRouteId],
   )
 
-  const corridor = corridorState?.routeId === selectedRouteId ? corridorState.data : null
-  const corridorLoading = Boolean(selectedRoute) && corridorState?.routeId !== selectedRouteId
+  const corridor = plan && corridorState?.planId === plan.generated_at ? corridorState.data : null
+  const corridorLoading = Boolean(plan) && corridorState?.planId !== plan?.generated_at
 
   const runPlan = useCallback(async (values: TripFormValues) => {
     const originText = values.origin.trim()
@@ -98,6 +99,7 @@ export function useTripSession() {
         destination: result.request.destination.label,
         originPlace: result.request.origin,
         destinationPlace: result.request.destination,
+        demoLoadWind: current.demoLoadWind || result.request.demo_scenario === 'load_wind',
       }))
       rememberTrip(result)
       return true
@@ -113,34 +115,37 @@ export function useTripSession() {
   }, [])
 
   useEffect(() => {
-    if (!plan || !selectedRoute) return
+    if (!plan) return
+    const seeds = mergeCorridorSeeds(plan.routes)
+    if (seeds.length < 2) return
 
     corridorAbort.current?.abort()
     const controller = new AbortController()
     corridorAbort.current = controller
-    const routeId = selectedRoute.id
+    const planId = plan.generated_at
+    const demoOn = plan.request.demo_scenario === 'load_wind'
 
     fetchCorridor(
       {
-        seeds: selectedRoute.corridor_seeds,
+        seeds,
         load_lb: plan.request.load_lb,
         anchor: plan.request.departure,
         hours: 48,
-        demo_scenario:
-          form.demoLoadWind && selectedRoute.id === plan.routes[0]?.id ? 'load_wind' : '',
+        demo_scenario: demoOn ? 'load_wind' : '',
+        route_lines: plan.routes.map((route) => route.geometry.coordinates),
       },
       controller.signal,
     )
       .then((result) => {
-        setCorridorState({ routeId, data: result })
+        setCorridorState({ planId, data: result })
         setHeatHour((hour) => Math.min(hour, Math.max(0, result.hours.length - 1)))
       })
       .catch((caught) => {
-        if ((caught as Error).name !== 'AbortError') setCorridorState({ routeId, data: null })
+        if ((caught as Error).name !== 'AbortError') setCorridorState({ planId, data: null })
       })
 
     return () => controller.abort()
-  }, [plan, selectedRoute])
+  }, [plan])
 
   const selectRoute = useCallback((routeId: string) => {
     setSelectedRouteId(routeId)

@@ -93,6 +93,13 @@ class CoordinateField(serializers.ListField):
         return (lon, lat)
 
 
+class DemoStormPointSerializer(serializers.Serializer):
+    lon = serializers.FloatField(min_value=-180, max_value=180)
+    lat = serializers.FloatField(min_value=-90, max_value=90)
+    wind_mph = serializers.FloatField(min_value=0, max_value=200)
+    wind_dir_deg = serializers.FloatField(required=False, allow_null=True, min_value=0, max_value=360)
+
+
 class CorridorRequestSerializer(serializers.Serializer):
     seeds = serializers.ListField(child=CoordinateField(), min_length=2, max_length=400)
     load_lb = serializers.FloatField(min_value=0, max_value=MAX_LOAD_LB)
@@ -102,6 +109,18 @@ class CorridorRequestSerializer(serializers.Serializer):
         choices=("", "load_wind"),
         required=False,
         default="",
+    )
+    demo_storm = serializers.ListField(
+        child=DemoStormPointSerializer(),
+        required=False,
+        default=list,
+        max_length=80,
+    )
+    route_lines = serializers.ListField(
+        child=serializers.ListField(child=CoordinateField(), min_length=2, max_length=4000),
+        required=False,
+        default=list,
+        max_length=6,
     )
 
     def validate_anchor(self, value: datetime) -> datetime:

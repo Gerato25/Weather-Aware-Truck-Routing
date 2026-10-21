@@ -16,8 +16,9 @@ function seriesAt(
   min = Number.NEGATIVE_INFINITY,
 ): number[] {
   if (!rows?.length) return []
+  const index = Math.max(0, Math.round(hour))
   return rows
-    .map((row) => row[hour])
+    .map((row) => row[index])
     .filter((value): value is number => value != null && Number.isFinite(value) && value >= min)
 }
 
@@ -76,7 +77,7 @@ function cellAt(
   index: number,
   hour: number,
 ): number | null {
-  const value = rows?.[index]?.[hour]
+  const value = rows?.[index]?.[Math.max(0, Math.round(hour))]
   return value == null || !Number.isFinite(value) ? null : value
 }
 
@@ -117,11 +118,28 @@ export interface CorridorRiskStop {
   level: RiskDisplaySlug
 }
 
-/** Ordered risk colors along the corridor at one forecast hour, for the distance bar. */
+/** Overlay risk along a single route, origin → destination, at one forecast hour. */
 export function corridorRiskStops(
   corridor: CorridorResponse | null,
   hour: number,
+  route?: {
+    checkpoints: Array<{ lon: number; lat: number; mile: number }>
+    summary: { distance_miles: number }
+  } | null,
 ): CorridorRiskStop[] {
+  if (route?.checkpoints.length) {
+    const total = Math.max(1, route.summary.distance_miles)
+    const stops: CorridorRiskStop[] = []
+    for (const checkpoint of route.checkpoints) {
+      const sample = corridor ? corridorSampleAt(corridor, checkpoint.lon, checkpoint.lat, hour) : null
+      const level = sample?.level ?? 'UNKNOWN'
+      const t = Math.max(0, Math.min(1, checkpoint.mile / total))
+      const prev = stops[stops.length - 1]
+      if (prev && prev.level === level) prev.t = t
+      else stops.push({ t, level })
+    }
+    return stops
+  }
   if (!corridor?.points.length || !corridor.risk.length) return []
   const last = Math.max(1, corridor.points.length - 1)
   return corridor.points.map((_, index) => ({

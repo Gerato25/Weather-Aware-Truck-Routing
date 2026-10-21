@@ -5,6 +5,7 @@ import {
   GeoJSONSource,
   LngLatBounds,
   Map as MapLibreMap,
+  Marker,
   NavigationControl,
   Popup,
   ScaleControl,
@@ -15,17 +16,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { CAUSE_ICONS, registerCauseIcons, registerRouteBadges, type CauseKind } from '../lib/causeIcons'
 import {
-  CORRIDOR_CAUSE_LAYER,
-  CORRIDOR_FILL_LAYER,
-  CORRIDOR_SOURCE,
-  causeFilter,
-  corridorHourGeoJSON,
+  WX_ARROW_LAYER,
+  WX_ARROW_SOURCE,
+  WIND_ICON_ROTATE,
+  areaArrowGeoJSON,
   hourFilter,
-  overlayFillColor,
-  overlayFillOpacity,
   overlayFromHeatLayers,
   type OverlayMode,
 } from '../lib/corridorHeat'
+import { addWeatherRaster, type WeatherRasterHandle } from '../map/weatherRaster'
+import { syncDestinationMarker } from '../lib/destinationMarker'
+import { syncRouteCardMarkers } from '../lib/mapRouteCards'
+import { setWeatherHour } from '../lib/weatherArea'
 import { corridorSampleAt } from '../lib/corridorHour'
 import { compassFromDeg, formatClock, formatEtaRelative, formatForecastStamp } from '../lib/format'
 import { truckAtHour } from '../lib/truckAtHour'
@@ -57,9 +59,11 @@ const SOURCES = {
   callouts: 'callouts',
   endpoints: 'endpoints',
   truck: 'truck',
+  etaLabels: 'eta-labels',
 } as const
 
 const LAYERS = {
+  etaLabel: 'eta-label',
   routeCasing: 'route-casing',
   routeLine: 'route-line',
   routeLabel: 'route-label',
@@ -309,6 +313,27 @@ function calloutCauseLine(cp: Checkpoint, loadLb: number): string {
   return cp.risk.reasons[0] ?? cp.risk.label
 }
 
+function milesAtLeast(route: Route, minScore: number): number {
+  return route.checkpoints.reduce((sum, cp) => {
+    if (cp.risk.available === false || cp.risk.score < minScore) return sum
+    return sum + cp.segment_miles
+  }, 0)
+}
+
+function longestRunMiles(route: Route, minScore: number): number {
+  let best = 0
+  let current = 0
+  for (const cp of route.checkpoints) {
+    if (cp.risk.available !== false && cp.risk.score >= minScore) {
+      current += cp.segment_miles
+      best = Math.max(best, current)
+    } else {
+      current = 0
+    }
+  }
+  return best
+}
+
 function worstStretchCallout(route: Route, letter: string, loadLb: number): Feature | null {
   const candidates = route.checkpoints.filter((cp) => cp.risk.available !== false && cp.risk.score >= CALLOUT_MIN_SCORE)
   if (!candidates.length) return null
@@ -319,11 +344,19 @@ function worstStretchCallout(route: Route, letter: string, loadLb: number): Feat
     if (wind !== leadWind) return wind > leadWind ? cp : lead
     return cp.mile < lead.mile ? cp : lead
   })
-  const label = `${letter} · ${Math.round(worst.mile)} mi ${worst.risk.label} · ${calloutCauseLine(worst, loadLb)}`
+  const billed =
+    worst.risk.level === 'UNKNOWN' ? undefined : route.summary.miles_by_level[worst.risk.level]
+  const total = Math.round(billed ?? milesAtLeast(route, worst.risk.score))
+  const run = Math.round(longestRunMiles(route, worst.risk.score))
+  const stretch =
+    run > 0 && run + 40 < total
+      ? `worst stretch ${run} mi · ${total} mi total`
+      : `${total} mi ${worst.risk.label}`
+  const label = `${letter} · ${stretch} · ${calloutCauseLine(worst, loadLb)}`
   return {
     type: 'Feature',
     geometry: { type: 'Point', coordinates: [worst.lon, worst.lat] },
-    properties: { routeId: route.id, label },
+    properties: { routeId: route.id, label, level: worst.risk.level, letter },
   }
 }
 
@@ -375,20 +408,13 @@ function calloutsToGeoJSON(
   return { type: 'FeatureCollection', features }
 }
 
-function endpointsToGeoJSON(origin: Place | null, destination: Place | null): FeatureCollection {
+function endpointsToGeoJSON(origin: Place | null): FeatureCollection {
   const features: Feature[] = []
   if (origin) {
     features.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [origin.lon, origin.lat] },
-      properties: { kind: origin.label.split(',')[0]?.trim() || 'Origin', color: '#22c55e' },
-    })
-  }
-  if (destination) {
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [destination.lon, destination.lat] },
-      properties: { kind: destination.label.split(',')[0]?.trim() || 'Destination', color: '#ef4444' },
+      properties: { kind: origin.label.split(',')[0]?.trim() || 'Origin', color: '#94a3b8' },
     })
   }
   return { type: 'FeatureCollection', features }
@@ -472,6 +498,22 @@ function checkpointPopupHtml(
   `
 }
 
+function etaLabelsToGeoJSON(route: Route | null): FeatureCollection {
+  if (!route) return EMPTY_COLLECTION
+  const duration = route.summary.duration_hours
+  const features: Feature[] = []
+  for (let hour = 2; hour < duration - 0.15; hour += 2) {
+    const truck = truckAtHour(route, hour)
+    if (!truck || truck.arrived) continue
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [truck.lon, truck.lat] },
+      properties: { label: `+${hour}h`, hour },
+    })
+  }
+  return { type: 'FeatureCollection', features }
+}
+
 function truckToGeoJSON(route: Route | null, hour: number): FeatureCollection {
   const truck = truckAtHour(route, hour)
   if (!truck) return EMPTY_COLLECTION
@@ -537,75 +579,50 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
       map.addSource(name, { type: 'geojson', data: EMPTY_COLLECTION })
     }
   }
-  if (!map.getSource(CORRIDOR_SOURCE)) {
-    map.addSource(CORRIDOR_SOURCE, { type: 'geojson', data: EMPTY_COLLECTION })
+  if (!map.getSource(WX_ARROW_SOURCE)) {
+    map.addSource(WX_ARROW_SOURCE, { type: 'geojson', data: EMPTY_COLLECTION })
   }
   addLayer(map, {
-    id: CORRIDOR_FILL_LAYER,
-    type: 'circle',
-    source: CORRIDOR_SOURCE,
-    filter: hourFilter(0),
-    layout: { visibility: mode === 'off' ? 'none' : 'visible' },
-    paint: {
-      'circle-color': overlayFillColor(mode === 'off' ? 'all' : mode),
-      'circle-radius': [
-        'interpolate',
-        ['linear'],
-        ['zoom'],
-        3,
-        14,
-        8,
-        22,
-        12,
-        16,
-      ] as ExpressionSpecification,
-      'circle-blur': 0.78,
-      'circle-opacity': overlayFillOpacity(mode === 'off' ? 'all' : mode),
-      'circle-pitch-alignment': 'map',
-    },
-  })
-  addLayer(map, {
-    id: CORRIDOR_CAUSE_LAYER,
+    id: WX_ARROW_LAYER,
     type: 'symbol',
-    source: CORRIDOR_SOURCE,
-    filter: causeFilter(0, mode),
+    source: WX_ARROW_SOURCE,
+    filter: hourFilter(0),
     layout: {
       visibility: mode === 'off' ? 'none' : 'visible',
-      'icon-image': ['case', ['==', ['get', 'cause'], ''], CAUSE_ICONS.wind, ['get', 'cause']],
-      'icon-rotate': [
-        'case',
-        ['==', ['get', 'cause'], 'wind'],
-        ['+', ['get', 'windDir'], 180],
-        0,
-      ],
+      'icon-image': CAUSE_ICONS.wind,
+      'icon-rotate': WIND_ICON_ROTATE,
       'icon-rotation-alignment': 'map',
-      'icon-allow-overlap': false,
-      'icon-ignore-placement': false,
-      'icon-padding': 22,
+      'icon-pitch-alignment': 'map',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'icon-padding': 6,
       'icon-size': [
         'interpolate',
         ['linear'],
         ['zoom'],
         4,
-        [
-          'case',
-          ['==', ['get', 'cause'], 'wind'],
-          ['interpolate', ['linear'], ['get', 'wind'], 25, 0.32, 35, 0.42, 45, 0.55, 55, 0.7],
-          0.38,
-        ],
+        ['interpolate', ['linear'], ['get', 'wind'], 6, 0.16, 15, 0.24, 25, 0.34, 45, 0.5, 58, 0.68],
         11,
-        [
-          'case',
-          ['==', ['get', 'cause'], 'wind'],
-          ['interpolate', ['linear'], ['get', 'wind'], 25, 0.48, 35, 0.62, 45, 0.8, 55, 1],
-          0.55,
-        ],
+        ['interpolate', ['linear'], ['get', 'wind'], 6, 0.26, 15, 0.38, 25, 0.52, 45, 0.76, 58, 0.98],
       ],
     },
     paint: {
-      'icon-color': theme === 'light' ? '#1e293b' : '#f8fafc',
+      'icon-color': [
+        'interpolate',
+        ['linear'],
+        ['get', 'wind'],
+        6,
+        theme === 'light' ? '#cbd5e1' : '#64748b',
+        18,
+        theme === 'light' ? '#94a3b8' : '#94a3b8',
+        32,
+        theme === 'light' ? '#475569' : '#e2e8f0',
+        50,
+        theme === 'light' ? '#1e293b' : '#f8fafc',
+      ],
       'icon-halo-color': theme === 'light' ? '#ffffff' : '#020617',
-      'icon-halo-width': 1.1,
+      'icon-halo-width': 0.6,
+      'icon-opacity': ['interpolate', ['linear'], ['get', 'wind'], 6, 0.45, 20, 0.75, 40, 1],
     },
   })
 
@@ -672,19 +689,19 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.checkpoints,
     filter: ['==', ['get', 'elevated'], 0],
     paint: {
-      'circle-color': riskColorExpression,
+      'circle-color': '#ffffff',
       'circle-radius': [
         'interpolate',
         ['linear'],
         ['zoom'],
         4,
-        ['case', ['get', 'selected'], 4.2, 3],
+        ['case', ['get', 'selected'], 4.4, 3.2],
         11,
-        ['case', ['get', 'selected'], 6.5, 4.6],
+        ['case', ['get', 'selected'], 6.8, 5],
       ],
-      'circle-opacity': ['case', ['get', 'selected'], 1, 0.78],
-      'circle-stroke-width': ['case', ['get', 'selected'], 1.6, 1],
-      'circle-stroke-color': '#ffffff',
+      'circle-opacity': ['case', ['get', 'selected'], 1, 0.92],
+      'circle-stroke-width': ['case', ['get', 'selected'], 2.2, 1.6],
+      'circle-stroke-color': riskColorExpression,
     },
   })
 
@@ -720,10 +737,11 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
       'icon-rotate': [
         'case',
         ['==', ['get', 'cause'], 'wind'],
-        ['+', ['get', 'windDir'], 180],
+        WIND_ICON_ROTATE,
         0,
       ],
       'icon-rotation-alignment': 'map',
+      'icon-pitch-alignment': 'map',
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.42, 11, 0.7],
@@ -741,8 +759,9 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     filter: ['all', ['==', ['get', 'elevated'], 0], ['==', ['get', 'hasDir'], 1]],
     layout: {
       'icon-image': CAUSE_ICONS.wind,
-      'icon-rotate': ['+', ['get', 'windDir'], 180],
+      'icon-rotate': WIND_ICON_ROTATE,
       'icon-rotation-alignment': 'map',
+      'icon-pitch-alignment': 'map',
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       'icon-size': ['interpolate', ['linear'], ['zoom'], 6.5, 0.38, 11, 0.55],
@@ -760,9 +779,10 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.endpoints,
     paint: {
       'circle-color': ['get', 'color'],
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 6.5, 10, 10],
-      'circle-stroke-width': 3,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 4.2, 10, 6],
+      'circle-stroke-width': 2,
       'circle-stroke-color': '#ffffff',
+      'circle-opacity': 0.9,
     },
   })
 
@@ -772,8 +792,8 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.endpoints,
     layout: {
       'text-field': ['get', 'kind'],
-      'text-size': 11,
-      'text-offset': [0, 1.4],
+      'text-size': 10,
+      'text-offset': [0, 1.15],
       'text-anchor': 'top',
     },
     paint: {
@@ -822,6 +842,26 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
   })
 
   addLayer(map, {
+    id: LAYERS.etaLabel,
+    type: 'symbol',
+    source: SOURCES.etaLabels,
+    layout: {
+      'text-field': ['get', 'label'],
+      'text-size': 11,
+      'text-offset': [0, -1.15],
+      'text-anchor': 'bottom',
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+    },
+    paint: {
+      'text-color': theme === 'light' ? '#0f172a' : '#f8fafc',
+      'text-halo-color': theme === 'light' ? '#ffffff' : '#020617',
+      'text-halo-width': 1.4,
+      'text-opacity': 0.95,
+    },
+  })
+
+  addLayer(map, {
     id: LAYERS.routeLabel,
     type: 'symbol',
     source: SOURCES.routeLabels,
@@ -834,6 +874,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     },
   })
 
+  if (map.getLayer(LAYERS.callout)) map.removeLayer(LAYERS.callout)
   addLayer(map, {
     id: LAYERS.callout,
     type: 'symbol',
@@ -842,15 +883,25 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
       'text-field': ['get', 'label'],
       'text-size': 11,
       'text-anchor': 'bottom',
-      'text-offset': [0, -1.35],
-      'text-max-width': 22,
+      'text-offset': [
+        'match',
+        ['get', 'letter'],
+        'A',
+        ['literal', [2.4, -3.6]],
+        'B',
+        ['literal', [-1.8, -3.2]],
+        'C',
+        ['literal', [1.6, -4.8]],
+        ['literal', [2.0, -3.4]],
+      ],
+      'text-max-width': 24,
       'text-allow-overlap': true,
       'text-ignore-placement': true,
     },
     paint: {
-      'text-color': theme === 'light' ? '#0f172a' : '#f8fafc',
-      'text-halo-color': theme === 'light' ? '#ffffff' : '#020617',
-      'text-halo-width': 2.2,
+      'text-color': riskColorExpression,
+      'text-halo-color': '#ffffff',
+      'text-halo-width': 1.6,
     },
   })
 }
@@ -958,6 +1009,9 @@ export function MapView({
   const mapRef = useRef<MapLibreMap | null>(null)
   const popupRef = useRef<Popup | null>(null)
   const popupPinnedRef = useRef(false)
+  const destMarkerRef = useRef<Marker | null>(null)
+  const routeCardMarkersRef = useRef<Marker[]>([])
+  const wxRef = useRef<WeatherRasterHandle | null>(null)
   const hoverHideRef = useRef<number | null>(null)
   const [ready, setReady] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
@@ -990,7 +1044,7 @@ export function MapView({
     () => calloutsToGeoJSON(routes, hiddenIds, loadLb),
     [routes, hiddenIds, loadLb],
   )
-  const endpointData = useMemo(() => endpointsToGeoJSON(origin, destination), [origin, destination])
+  const endpointData = useMemo(() => endpointsToGeoJSON(origin), [origin])
   const selectedRoute = useMemo(
     () => routes.find((route) => route.id === selectedRouteId) ?? null,
     [routes, selectedRouteId],
@@ -999,7 +1053,12 @@ export function MapView({
     () => truckToGeoJSON(selectedRoute, heatHour),
     [selectedRoute, heatHour],
   )
-  const corridorData = useMemo(() => corridorHourGeoJSON(corridor), [corridor])
+  const recommendedRoute = useMemo(
+    () => routes.find((route) => route.id === recommendedRouteId) ?? null,
+    [routes, recommendedRouteId],
+  )
+  const arrowData = useMemo(() => areaArrowGeoJSON(corridor), [corridor])
+  const etaData = useMemo(() => etaLabelsToGeoJSON(recommendedRoute), [recommendedRoute])
   const [omTimes, setOmTimes] = useState<string[]>([])
   const themeRef = useRef(theme)
   const modeRef = useRef(mode)
@@ -1013,7 +1072,8 @@ export function MapView({
     checkpointData,
     calloutData,
     endpointData,
-    corridorData,
+    arrowData,
+    etaData,
     truckData,
   })
   themeRef.current = theme
@@ -1026,7 +1086,8 @@ export function MapView({
     checkpointData,
     calloutData,
     endpointData,
-    corridorData,
+    arrowData,
+    etaData,
     truckData,
   }
 
@@ -1046,7 +1107,7 @@ export function MapView({
         checkpointName(route, cp, trip.origin, trip.destination),
         overlay,
         trip.heatHour,
-        trip.corridor?.hours[trip.heatHour] ?? null,
+        trip.corridor?.hours[Math.round(trip.heatHour)] ?? null,
         trip.loadLb,
         trip.departureIso,
       ),
@@ -1076,33 +1137,16 @@ export function MapView({
 
   function applyOverlay(map: MapLibreMap, nextMode: OverlayMode, hour: number) {
     const show = nextMode !== 'off'
-    if (map.getLayer(CORRIDOR_FILL_LAYER)) {
-      map.setFilter(CORRIDOR_FILL_LAYER, hourFilter(hour))
-      map.setLayoutProperty(CORRIDOR_FILL_LAYER, 'visibility', show ? 'visible' : 'none')
-      map.setPaintProperty(CORRIDOR_FILL_LAYER, 'circle-color', overlayFillColor(show ? nextMode : 'all'))
-      map.setPaintProperty(CORRIDOR_FILL_LAYER, 'circle-opacity', overlayFillOpacity(show ? nextMode : 'all'))
+    setWeatherHour(map, hour, nextMode)
+    wxRef.current?.setHour(hour, nextMode)
+    if (map.getLayer(WX_ARROW_LAYER)) {
+      map.setLayoutProperty(WX_ARROW_LAYER, 'visibility', show ? 'visible' : 'none')
     }
-    if (map.getLayer(CORRIDOR_CAUSE_LAYER)) {
-      map.setFilter(CORRIDOR_CAUSE_LAYER, causeFilter(hour, nextMode))
-      map.setLayoutProperty(CORRIDOR_CAUSE_LAYER, 'visibility', show ? 'visible' : 'none')
-      const icon =
-        nextMode === 'wind' || nextMode === 'rain' || nextMode === 'snow'
-          ? CAUSE_ICONS[nextMode]
-          : (['case', ['==', ['get', 'cause'], ''], CAUSE_ICONS.wind, ['get', 'cause']] as ExpressionSpecification)
-      map.setLayoutProperty(CORRIDOR_CAUSE_LAYER, 'icon-image', icon)
-      map.setLayoutProperty(
-        CORRIDOR_CAUSE_LAYER,
-        'icon-rotate',
-        nextMode === 'wind'
-          ? (['+', ['get', 'windDir'], 180] as ExpressionSpecification)
-          : nextMode === 'rain' || nextMode === 'snow'
-            ? 0
-            : ([
-                'case',
-                ['==', ['get', 'cause'], 'wind'],
-                ['+', ['get', 'windDir'], 180],
-                0,
-              ] as ExpressionSpecification),
+    if (map.getLayer(LAYERS.etaLabel)) {
+      map.setPaintProperty(
+        LAYERS.etaLabel,
+        'text-opacity',
+        ['case', ['<=', ['get', 'hour'], hour], 0.22, 0.95],
       )
     }
   }
@@ -1123,8 +1167,10 @@ export function MapView({
     if (endpoints instanceof GeoJSONSource) endpoints.setData(data.endpointData)
     const truck = map.getSource(SOURCES.truck)
     if (truck instanceof GeoJSONSource) truck.setData(data.truckData)
-    const corridorSource = map.getSource(CORRIDOR_SOURCE)
-    if (corridorSource instanceof GeoJSONSource) corridorSource.setData(data.corridorData)
+    const arrows = map.getSource(WX_ARROW_SOURCE)
+    if (arrows instanceof GeoJSONSource) arrows.setData(data.arrowData)
+    const eta = map.getSource(SOURCES.etaLabels)
+    if (eta instanceof GeoJSONSource) eta.setData(data.etaData)
     applyOverlay(map, modeRef.current, hourRef.current)
   }
 
@@ -1210,6 +1256,10 @@ export function MapView({
     return () => {
       observer.disconnect()
       popupRef.current?.remove()
+      destMarkerRef.current?.remove()
+      destMarkerRef.current = null
+      routeCardMarkersRef.current.forEach((marker) => marker.remove())
+      routeCardMarkersRef.current = []
       map.remove()
       mapRef.current = null
       lastFitKey.current = null
@@ -1265,12 +1315,58 @@ export function MapView({
   }, [ready, endpointData])
 
   useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    destMarkerRef.current = syncDestinationMarker(
+      map,
+      destMarkerRef.current,
+      destination,
+      routes,
+      selectedRouteId,
+      heatHour,
+    )
+  }, [ready, styleEpoch, destination, routes, selectedRouteId, heatHour])
+
+  useEffect(() => {
     if (ready) setSourceData(SOURCES.truck, truckData)
   }, [ready, truckData])
 
   useEffect(() => {
-    if (ready) setSourceData(CORRIDOR_SOURCE, corridorData)
-  }, [ready, corridorData])
+    if (ready) setSourceData(SOURCES.etaLabels, etaData)
+  }, [ready, etaData])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    wxRef.current?.remove()
+    wxRef.current = null
+    if (corridor?.raster) {
+      wxRef.current = addWeatherRaster(map, corridor.raster)
+      wxRef.current.setHour(hourRef.current, modeRef.current)
+    }
+    return () => {
+      wxRef.current?.remove()
+      wxRef.current = null
+    }
+  }, [ready, corridor?.raster?.id, styleEpoch])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    routeCardMarkersRef.current = syncRouteCardMarkers(
+      map,
+      routeCardMarkersRef.current,
+      routes,
+      recommendedRouteId,
+      selectedRouteId,
+      hiddenIds,
+      (routeId) => selectRouteRef.current(routeId),
+    )
+  }, [ready, styleEpoch, routes, recommendedRouteId, selectedRouteId, hiddenIds])
+
+  useEffect(() => {
+    if (ready) setSourceData(WX_ARROW_SOURCE, arrowData)
+  }, [ready, arrowData])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1304,7 +1400,7 @@ export function MapView({
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
-    const step = timeStepForHour(omTimes, heatHour, corridor?.hours[heatHour])
+    const step = timeStepForHour(omTimes, heatHour, corridor?.hours[Math.round(heatHour)])
     const rasterOk = weatherRaster && omTimes.length > 0 && mode !== 'all' && mode !== 'off'
     for (const metric of HEAT_LAYER_KEYS) {
       const source = map.getSource(OM_SOURCE_IDS[metric])
@@ -1393,7 +1489,7 @@ export function MapView({
         checkpointName(route, cp, origin, destination),
         overlay,
         heatHour,
-        corridor?.hours[heatHour] ?? null,
+        corridor?.hours[Math.round(heatHour)] ?? null,
         loadLb,
         departureIso,
       ),

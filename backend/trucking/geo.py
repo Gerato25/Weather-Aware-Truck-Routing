@@ -143,6 +143,19 @@ class RouteProfile:
         elapsed = self.cum_s[i] + (self.cum_s[i + 1] - self.cum_s[i]) * t
         return coord, elapsed
 
+    def at_time(self, elapsed_s: float) -> tuple[Coord, float]:
+        """Interpolate the coordinate and route distance at an elapsed time."""
+        elapsed_s = min(max(elapsed_s, 0.0), self.total_s)
+        i = max(0, bisect_right(self.cum_s, elapsed_s) - 1)
+        if i >= len(self.coords) - 1:
+            return self.coords[-1], self.cum_m[-1]
+
+        span = self.cum_s[i + 1] - self.cum_s[i]
+        t = 0.0 if span <= 0 else (elapsed_s - self.cum_s[i]) / span
+        coord = lerp_coord(self.coords[i], self.coords[i + 1], t)
+        distance_m = self.cum_m[i] + (self.cum_m[i + 1] - self.cum_m[i]) * t
+        return coord, distance_m
+
     def sample(self, interval_m: float, max_points: int | None = None) -> list[Checkpoint]:
         """Checkpoints every ``interval_m``, always including origin and destination.
 
