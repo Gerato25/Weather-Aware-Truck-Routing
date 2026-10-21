@@ -27,7 +27,7 @@ import {
 import { addWeatherRaster, type WeatherRasterHandle } from '../map/weatherRaster'
 import { syncDestinationMarker } from '../lib/destinationMarker'
 import { setWeatherHour } from '../lib/weatherArea'
-import { corridorSampleAt, overlayLevelAt } from '../lib/corridorHour'
+import { corridorSampleAt } from '../lib/corridorHour'
 import { compassFromDeg, formatForecastStamp } from '../lib/format'
 import { truckAtHour } from '../lib/truckAtHour'
 import {
@@ -41,10 +41,6 @@ import {
   HEAT_LAYER_KEYS,
   HIDDEN_HEAT_LAYERS,
   RISK_COLORS,
-  RISK_LABELS,
-  classifyRain,
-  classifySnow,
-  classifyWind,
   riskColor,
   routeColor,
   routeLineColor,
@@ -189,7 +185,7 @@ function routesToGeoJSON(
   selectedRouteId: string | null,
   hiddenIds: Set<string>,
   theme: Theme = 'light',
-  corridor: CorridorResponse | null = null,
+  _corridor: CorridorResponse | null = null,
   hour = 0,
   mode: OverlayMode = 'all',
 ): FeatureCollection {
@@ -200,10 +196,14 @@ function routesToGeoJSON(
     const identity = routeColor(index, theme)
     const identityLine = routeLineColor(index, theme, selected)
     const checkpoints = route.checkpoints
-    const colorFor = (lon: number, lat: number, fallback: typeof checkpoints[number]['risk']['level']) => {
+    const colorFor = (
+      _lon: number,
+      _lat: number,
+      fallback: typeof checkpoints[number]['risk']['level'],
+    ) => {
       if (!selected) return identity
       if (mode === 'off') return identityLine
-      return riskColor(overlayLevelAt(corridor, lon, lat, hour, mode, fallback))
+      return riskColor(fallback)
     }
     if (checkpoints.length < 2) {
       const start = route.geometry.coordinates[0]
@@ -215,6 +215,7 @@ function routesToGeoJSON(
           label: route.label,
           letter: routeLetter(index),
           color: start ? colorFor(start[0], start[1], 'UNKNOWN') : identityLine,
+          traveled: 1,
           identity,
           selected,
         },
@@ -223,6 +224,7 @@ function routesToGeoJSON(
     }
     for (let i = 0; i < checkpoints.length - 1; i += 1) {
       const from = checkpoints[i]
+      const traveled = from.elapsed_minutes / 60 <= hour
       features.push({
         type: 'Feature',
         geometry: {
@@ -236,6 +238,7 @@ function routesToGeoJSON(
           color: colorFor(from.lon, from.lat, from.risk.level),
           identity,
           selected,
+          traveled: traveled ? 1 : 0,
         },
       })
     }
@@ -397,18 +400,10 @@ function checkpointsToGeoJSON(
     const identity = routeColor(index, theme)
     for (const cp of route.checkpoints) {
       const overlay = corridor ? corridorSampleAt(corridor, cp.lon, cp.lat, hour) : null
-      const cause = overlay
-        ? overlay.cause === 'wind' || overlay.cause === 'rain' || overlay.cause === 'snow'
-          ? overlay.cause
-          : causeFromValues(overlay.wind, overlay.rain, overlay.snow)
-        : etaCause(cp)
-      const elevated = overlay
-        ? cause !== '' && (overlay.risk ?? 0) >= 1
-          ? 1
-          : 0
-        : cp.risk.available !== false && cp.risk.score >= 1 && cp.risk.level !== 'LOW'
-          ? 1
-          : 0
+      const traveled = cp.elapsed_minutes / 60 <= hour
+      const cause = etaCause(cp)
+      const elevated =
+        cp.risk.available !== false && cp.risk.score >= 1 && cp.risk.level !== 'LOW' ? 1 : 0
       const windDir = overlay?.windDir ?? cp.weather.wind_dir_deg ?? 0
       const hasDir = (overlay?.windDir != null ? 1 : 0) || (cp.weather.wind_dir_deg != null ? 1 : 0)
       features.push({
@@ -417,9 +412,10 @@ function checkpointsToGeoJSON(
         properties: {
           routeId: route.id,
           index: cp.index,
-          level: overlay?.level ?? cp.risk.level,
-          score: overlay?.risk ?? cp.risk.score,
+          level: cp.risk.level,
+          score: cp.risk.score,
           selected,
+          traveled: traveled ? 1 : 0,
           elevated,
           cause: elevated ? cause : '',
           identity,
@@ -468,54 +464,21 @@ function riskPill(level: RiskDisplaySlug, label: string): string {
   return `<span class="popup-level" style="background:${riskColor(level)};color:${ink}">${escapeHtml(label)}</span>`
 }
 
-function overlayReason(overlay: NonNullable<ReturnType<typeof corridorSampleAt>>): string {
-  const rain = overlay.rain ?? 0
-  const snow = overlay.snow ?? 0
-  const wind = overlay.wind ?? 0
-  if (overlay.level === 'LOW') return 'All conditions within Low thresholds.'
-  if (overlay.cause === 'rain' || classifyRain(rain) === overlay.level) {
-    return `Rain ${rain.toFixed(2)} in/hr — ${RISK_LABELS[overlay.level]}`
-  }
-  if (overlay.cause === 'snow' || classifySnow(snow) === overlay.level) {
-    return `Snow ${snow.toFixed(1)} in/hr — ${RISK_LABELS[overlay.level]}`
-  }
-  if (overlay.cause === 'wind' || classifyWind(wind) === overlay.level) {
-    return `Wind ${Math.round(wind)} mph — ${RISK_LABELS[overlay.level]}`
-  }
-  return `${RISK_LABELS[overlay.level]} at this map hour.`
-}
-
-function checkpointPopupHtml(
-  cp: Checkpoint,
-  name?: string,
-  overlay?: ReturnType<typeof corridorSampleAt>,
-  hour?: number,
-  overlayAt?: string | null,
-  loadLb?: number,
-  _departureIso?: string | null,
-): string {
+function checkpointPopupHtml(cp: Checkpoint, name?: string, loadLb?: number): string {
   const { weather, risk } = cp
   const title = name || `Mile ${Math.round(cp.mile)}`
-  const sliderHour = Number.isFinite(hour) ? Math.round(Number(hour)) : 0
-  const hourLabel = `+${sliderHour}h`
-  const overlayWhen = overlayAt ? escapeHtml(formatForecastStamp(overlayAt)) : ''
-  const overlayDir = overlay?.windDir != null ? compassFromDeg(overlay.windDir) : null
-  const level = overlay?.level ?? risk.level
-  const label = overlay ? RISK_LABELS[overlay.level] : risk.label
+  const level = risk.level
+  const label = risk.label
   const pill = riskPill(level, label)
-  const reason = overlay
-    ? escapeHtml(overlayReason(overlay))
-    : escapeHtml(
-        risk.reasons[0] ??
-          (risk.available === false
-            ? 'Weather data was unavailable; this checkpoint was not scored as Low.'
-            : 'All conditions within Low thresholds.'),
-      )
+  const reason = escapeHtml(
+    risk.reasons[0] ??
+      (risk.available === false
+        ? 'Weather data was unavailable; this checkpoint was not scored as Low.'
+        : 'All conditions within Low thresholds.'),
+  )
   const loadLine = loadLb ? `<span>Load: ${Math.round(loadLb).toLocaleString()} lb</span>` : ''
-  const wind = overlay ? popupNumber(overlay.wind, 0, ' mph') : popupNumber(weather.wind_mph, 0, ' mph')
-  const rain = overlay ? popupNumber(overlay.rain, 2, ' in/hr') : popupNumber(weather.rain_in_hr, 2, ' in/hr')
-  const snow = overlay ? popupNumber(overlay.snow, 1, ' in/hr') : popupNumber(weather.snow_in_hr, 1, ' in/hr')
-  const windExtra = overlayDir ? ` ${escapeHtml(overlayDir)}` : ''
+  const dir = weather.wind_dir ?? compassFromDeg(weather.wind_dir_deg)
+  const when = escapeHtml(formatForecastStamp(weather.forecast_at ?? cp.eta))
 
   return `
     <div class="popup">
@@ -523,12 +486,12 @@ function checkpointPopupHtml(
         <span class="popup-mile">${escapeHtml(title)}</span>
         ${pill}
       </div>
-      <p class="popup-section-label">This location · ${hourLabel}</p>
-      ${overlayWhen ? `<p class="popup-section-time">${overlayWhen}</p>` : ''}
+      <p class="popup-section-label">Truck arrival</p>
+      ${when !== '—' ? `<p class="popup-section-time">${when}</p>` : ''}
       <dl class="popup-grid">
-        <div><dt>Wind</dt><dd>${wind}${windExtra}</dd></div>
-        <div><dt>Rain</dt><dd>${rain}</dd></div>
-        <div><dt>Snow</dt><dd>${snow}</dd></div>
+        <div><dt>Wind</dt><dd>${popupNumber(weather.wind_mph, 0, ' mph')}${dir ? ` ${escapeHtml(dir)}` : ''}</dd></div>
+        <div><dt>Rain</dt><dd>${popupNumber(weather.rain_in_hr, 2, ' in/hr')}</dd></div>
+        <div><dt>Snow</dt><dd>${popupNumber(weather.snow_in_hr, 1, ' in/hr')}</dd></div>
         <div><dt>Risk</dt><dd>${escapeHtml(label)}</dd></div>
       </dl>
       <p class="popup-risk" style="--level-color:${riskColor(level)}">
@@ -699,7 +662,12 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         10,
         ['case', ['get', 'selected'], 12, 5],
       ],
-      'line-opacity': ['case', ['get', 'selected'], theme === 'light' ? 0.55 : 0.7, 0.55],
+      'line-opacity': [
+        'case',
+        ['get', 'selected'],
+        ['case', ['==', ['get', 'traveled'], 1], theme === 'light' ? 0.55 : 0.7, 0.22],
+        0.55,
+      ],
     },
   })
 
@@ -719,7 +687,12 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         10,
         ['case', ['get', 'selected'], 7.5, 3.6],
       ],
-      'line-opacity': ['case', ['get', 'selected'], 1, 0.9],
+      'line-opacity': [
+        'case',
+        ['get', 'selected'],
+        ['case', ['==', ['get', 'traveled'], 1], 1, 0.38],
+        0.9,
+      ],
     },
   })
 
@@ -757,7 +730,14 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         11,
         ['case', ['get', 'selected'], 8, 4.5],
       ],
-      'circle-opacity': ['case', ['get', 'selected'], 1, 0.75],
+      'circle-opacity': [
+        'case',
+        ['all', ['get', 'selected'], ['==', ['get', 'traveled'], 1]],
+        1,
+        ['get', 'selected'],
+        0.4,
+        0.75,
+      ],
       'circle-stroke-width': 2,
       'circle-stroke-color': '#ffffff',
     },
@@ -779,7 +759,14 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         11,
         ['case', ['get', 'selected'], 12, 6],
       ],
-      'circle-opacity': ['case', ['get', 'selected'], 1, 0.75],
+      'circle-opacity': [
+        'case',
+        ['all', ['get', 'selected'], ['==', ['get', 'traveled'], 1]],
+        1,
+        ['get', 'selected'],
+        0.4,
+        0.75,
+      ],
       'circle-stroke-width': 2,
       'circle-stroke-color': '#ffffff',
     },
@@ -1182,19 +1169,12 @@ export function MapView({
     if (!route) return null
     const cp = route.checkpoints.find((item) => item.index === ref.index)
     if (!cp) return null
-    const overlay = trip.corridor
-      ? corridorSampleAt(trip.corridor, cp.lon, cp.lat, trip.heatHour)
-      : null
     return {
       coordinates: [cp.lon, cp.lat],
       html: checkpointPopupHtml(
         cp,
         checkpointName(route, cp, trip.origin, trip.destination),
-        overlay,
-        Math.round(trip.heatHour),
-        trip.corridor?.hours[Math.round(trip.heatHour)] ?? null,
         trip.loadLb,
-        trip.departureIso,
       ),
     }
   }

@@ -306,6 +306,7 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
               plan={plan}
               selectedRouteId={selectedRouteId}
               focused={focused}
+              heatHour={heatHour}
               onSelectRoute={handleSelectRoute}
               onFocusCheckpoint={handleFocusCheckpoint}
             />
@@ -403,7 +404,7 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
                     </div>
                     <p className="font-semibold text-slate-800">42 mi corridor</p>
                     <p className="mt-1.5 text-[9px] leading-4 text-slate-500">
-                      Route color is risk at the slider hour. Cards list Severe / High / Low miles.
+                      Traveled miles use arrival weather. The slider only marks how far the truck has gone.
                     </p>
                   </div>
                 </div>

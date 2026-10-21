@@ -18,6 +18,7 @@ interface RouteDetailsProps {
   plan: PlanResponse | null
   selectedRouteId: string | null
   focused: CheckpointRef | null
+  heatHour?: number
   compact?: boolean
   embedded?: boolean
   onSelectRoute: (routeId: string) => void
@@ -139,6 +140,7 @@ export function RouteDetails({
   plan,
   selectedRouteId,
   focused,
+  heatHour = 0,
   compact = false,
   embedded = false,
   onSelectRoute,
@@ -174,7 +176,7 @@ export function RouteDetails({
         </div>
         {selected && (
           <p className="text-[11px] text-slate-500">
-            {selected.checkpoints.length} checkpoints · arrival-time forecast
+            {selected.checkpoints.length} checkpoints · weather at truck arrival · slider marks miles already traveled
           </p>
         )}
       </div>
@@ -241,6 +243,12 @@ export function RouteDetails({
                 {selected.checkpoints.map((checkpoint) => {
                   const active =
                     focused?.routeId === selected.id && focused.index === checkpoint.index
+                  const traveled = checkpoint.elapsed_minutes / 60 <= heatHour
+                  const level = checkpoint.risk.level
+                  const wind = checkpoint.weather.wind_mph
+                  const rain = checkpoint.weather.rain_in_hr
+                  const snow = checkpoint.weather.snow_in_hr
+                  const temp = checkpoint.weather.temperature_f
                   const gusts =
                     checkpoint.weather.wind_gust_mph != null &&
                     Number.isFinite(checkpoint.weather.wind_gust_mph)
@@ -250,17 +258,17 @@ export function RouteDetails({
                     <tr
                       key={checkpoint.index}
                       className={`cursor-pointer border-t border-slate-100 ${
-                        active ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'
+                        active ? 'bg-blue-50' : traveled ? 'bg-white hover:bg-slate-50' : 'bg-white/70 text-slate-400 hover:bg-slate-50'
                       }`}
                       onClick={() =>
                         onFocusCheckpoint({ routeId: selected.id, index: checkpoint.index })
                       }
                     >
-                      <td className={`${embedded ? 'pl-3 pr-2' : 'px-2'} py-1.5 font-medium text-slate-800`}>
+                      <td className={`${embedded ? 'pl-3 pr-2' : 'px-2'} py-1.5 font-medium ${traveled ? 'text-slate-800' : 'text-slate-400'}`}>
                         <span className="inline-flex items-center gap-1.5">
                           <i
                             className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ background: BADGE_STYLE[checkpoint.risk.level].background }}
+                            style={{ background: BADGE_STYLE[level].background }}
                           />
                           {checkpointLabel(selected, checkpoint, origin, destination)}
                         </span>
@@ -272,23 +280,23 @@ export function RouteDetails({
                       <td className={`whitespace-nowrap py-1.5 tabular-nums text-slate-700 ${embedded ? 'px-1' : 'px-2'}`}>
                         {formatEtaClock(checkpoint.eta)}
                       </td>
-                      <td className={`py-1.5 ${embedded ? 'px-1' : 'px-2'}`}>
-                        <CompactRiskBadge level={checkpoint.risk.level} />
+                      <td className={`py-1.5 ${embedded ? 'px-1' : 'px-2'} ${traveled ? '' : 'opacity-45'}`}>
+                        <CompactRiskBadge level={level} />
                       </td>
                       {!embedded && (
                         <>
                           <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                            {formatWeather(checkpoint.weather.wind_mph, 0, ' mph')}
-                            {checkpoint.weather.wind_mph == null ? '' : gusts}
+                            {formatWeather(wind, 0, ' mph')}
+                            {wind == null ? '' : gusts}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                            {formatWeather(checkpoint.weather.rain_in_hr, 2, ' in/hr')}
+                            {formatWeather(rain, 2, ' in/hr')}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                            {formatWeather(checkpoint.weather.snow_in_hr, 1, ' in/hr')}
+                            {formatWeather(snow, 1, ' in/hr')}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                            {formatWeather(checkpoint.weather.temperature_f, 0, '°F')}
+                            {formatWeather(temp, 0, '°F')}
                           </td>
                         </>
                       )}
