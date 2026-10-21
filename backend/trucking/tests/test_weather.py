@@ -183,3 +183,48 @@ class OpenMeteoParseTests(SimpleTestCase):
         inside = forecast.sample_at(1_700_000_000)
         self.assertTrue(inside.has_observation())
         self.assertAlmostEqual(inside.wind_mph, 40.0, places=1)
+
+
+class BrowserPrefetchTests(SimpleTestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_prefetched_series_skip_the_network(self):
+        point = (-118.24, 34.05)
+        prefetched = OpenMeteoClient.parse_prefetched([point], [_series()])
+        client = OpenMeteoClient(fallback=None, prefetched=prefetched)
+        with mock.patch("trucking.weather.open_meteo.request_json") as request:
+            result = client.forecasts([point], forecast_days=2)
+        request.assert_not_called()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(client.source, "open-meteo")
+        self.assertIsNone(client.browser_request())
+
+    def test_rate_limited_points_are_handed_to_the_browser(self):
+        busy = UpstreamError(
+            "Open-Meteo returned 429: Daily API request limit exceeded.",
+            provider="Open-Meteo",
+            status=429,
+        )
+        fallback = mock.Mock()
+        fallback.name = "nws"
+        fallback.forecasts.side_effect = lambda keys, days: {
+            key: PointForecast(lon=key[0], lat=key[1], times=[1]) for key in keys
+        }
+        client = OpenMeteoClient(fallback=fallback)
+        with mock.patch("trucking.weather.open_meteo.request_json", side_effect=busy):
+            client.forecasts([(-118.24, 34.05), (-119.79, 36.74)], forecast_days=4)
+
+        wanted = client.browser_request()
+        self.assertEqual(len(wanted["points"]), 2)
+        self.assertEqual(wanted["params"]["forecast_days"], "4")
+        self.assertIn("wind_gusts_10m", wanted["params"]["hourly"])
+
+    def test_prefetched_series_are_not_cached_for_other_requests(self):
+        point = (-118.24, 34.05)
+        OpenMeteoClient(
+            fallback=None, prefetched=OpenMeteoClient.parse_prefetched([point], [_series()])
+        ).forecasts([point], forecast_days=2)
+        with mock.patch("trucking.weather.open_meteo.request_json", return_value=_series()) as request:
+            OpenMeteoClient(fallback=None).forecasts([point], forecast_days=2)
+        request.assert_called_once()

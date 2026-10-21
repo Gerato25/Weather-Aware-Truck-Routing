@@ -237,3 +237,32 @@ class GeocodeEndpointTests(SimpleTestCase):
             "Los Angele",
         )
         self.assertEqual(label, "Los Angeles, California, United States")
+
+
+class BrowserWeatherPayloadTests(SimpleTestCase):
+    def test_prefetch_needs_one_entry_per_point(self):
+        payload = valid_payload(open_meteo={"points": [[-87.6, 41.9], [-75.2, 40.0]], "entries": [{}]})
+        response = self.client.post("/api/plan/", payload, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_plan_reports_points_the_browser_should_fetch(self):
+        def fake_plan(trip, weather_client):
+            weather_client.unserved.add((-87.6, 41.88))
+            weather_client.max_days = 3
+            return {"routes": []}
+
+        with mock.patch("trucking.views.plan_trip", side_effect=fake_plan):
+            response = self.client.post("/api/plan/", valid_payload(), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["weather_request"]["points"], [[-87.6, 41.88]])
+
+    def test_demo_plans_never_ask_the_browser_for_weather(self):
+        def fake_plan(trip, weather_client):
+            weather_client.unserved.add((-87.6, 41.88))
+            return {"routes": []}
+
+        with mock.patch("trucking.views.plan_trip", side_effect=fake_plan):
+            response = self.client.post(
+                "/api/plan/", valid_payload(demo_scenario="load_wind"), content_type="application/json"
+            )
+        self.assertIsNone(response.json()["weather_request"])

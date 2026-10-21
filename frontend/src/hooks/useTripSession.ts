@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { ApiError, fetchCorridor, planTrip, type PlanPayload } from '../api/client'
+import { ApiError, fetchCorridor, fetchOpenMeteoInBrowser, planTrip, type PlanPayload } from '../api/client'
 import { mergeCorridorSeeds } from '../lib/corridorHeat'
 import { INITIAL_FORM } from '../lib/demoTrips'
 import { fromLocalInputValue, hoursFromNow, toLocalInputValue } from '../lib/format'
@@ -22,6 +22,9 @@ export function useTripSession() {
   } | null>(null)
   const [heatHour, setHeatHour] = useState(0)
   const [heatLayers, setHeatLayers] = useState(DEFAULT_HEAT_LAYERS)
+  // Re-scoring with Open-Meteo fetched by this browser after the server was
+  // rate-limited: 'loading' while it runs, 'failed' if the browser was refused too.
+  const [browserWeather, setBrowserWeather] = useState<'idle' | 'loading' | 'failed'>('idle')
 
   const planAbort = useRef<AbortController | null>(null)
   const corridorAbort = useRef<AbortController | null>(null)
@@ -91,6 +94,7 @@ export function useTripSession() {
     setCorridorState(null)
     corridorPlanId.current = null
     setFocused(null)
+    setBrowserWeather('idle')
 
     const payload: PlanPayload = {
       origin: values.originPlace ?? { query: originText },
@@ -115,6 +119,35 @@ export function useTripSession() {
         demoLoadWind: current.demoLoadWind,
       }))
       rememberTrip(result)
+      if (result.weather_request) {
+        const wanted = result.weather_request
+        setBrowserWeather('loading')
+        void (async () => {
+          try {
+            const open_meteo = await fetchOpenMeteoInBrowser(wanted, controller.signal)
+            const better = await planTrip(
+              {
+                ...payload,
+                origin: result.request.origin,
+                destination: result.request.destination,
+                open_meteo,
+              },
+              controller.signal,
+            )
+            if (controller.signal.aborted) return
+            setPlan(better)
+            setSelectedRouteId((current) =>
+              current === result.recommendation.route_id || !better.routes.some((r) => r.id === current)
+                ? better.recommendation.route_id
+                : current,
+            )
+            setBrowserWeather(better.weather_request ? 'failed' : 'idle')
+          } catch (caught) {
+            if ((caught as Error).name === 'AbortError' || controller.signal.aborted) return
+            setBrowserWeather('failed')
+          }
+        })()
+      }
       return true
     } catch (caught) {
       if ((caught as Error).name === 'AbortError') return false
@@ -138,24 +171,41 @@ export function useTripSession() {
 
     const demoOn = plan.request.demo_scenario === 'load_wind'
     corridorPlanId.current = planId
+    corridorAbort.current?.abort()
+    const controller = new AbortController()
+    corridorAbort.current = controller
 
-    fetchCorridor({
+    const body = {
       seeds,
       load_lb: plan.request.load_lb,
       anchor: plan.request.departure,
       hours: 48,
-      demo_scenario: demoOn ? 'load_wind' : '',
+      demo_scenario: demoOn ? ('load_wind' as const) : ('' as const),
       route_lines: plan.routes.map((route) => route.geometry.coordinates),
-    })
-      .then((result) => {
-        if (corridorPlanId.current !== planId || !result?.hours) return
+    }
+    const isCurrent = () => corridorPlanId.current === planId && !controller.signal.aborted
+
+    fetchCorridor(body, controller.signal)
+      .then(async (result) => {
+        if (!isCurrent() || !result?.hours) return
         setCorridorState({ planId, data: result })
         setHeatHour((hour) => Math.min(hour, Math.max(0, result.hours.length - 1)))
+        if (!result.weather_request) return
+        // Same hand-off as the plan: replace fallback weather with Open-Meteo
+        // fetched by this browser. A failure keeps the heatmap already shown.
+        try {
+          const open_meteo = await fetchOpenMeteoInBrowser(result.weather_request, controller.signal)
+          const better = await fetchCorridor({ ...body, open_meteo }, controller.signal)
+          if (isCurrent() && better?.hours) setCorridorState({ planId, data: better })
+        } catch {
+          /* keep the fallback heatmap */
+        }
       })
       .catch((caught) => {
-        if (corridorPlanId.current !== planId || (caught as Error).name === 'AbortError') return
+        if (!isCurrent() || (caught as Error).name === 'AbortError') return
         setCorridorState({ planId, data: null })
       })
+    return () => controller.abort()
   }, [plan])
 
   const selectRoute = useCallback((routeId: string) => {
@@ -179,6 +229,7 @@ export function useTripSession() {
     setHeatHour,
     heatLayers,
     setHeatLayers,
+    browserWeather,
     runPlan,
     selectRoute,
   }

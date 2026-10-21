@@ -51,6 +51,7 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
     plan,
     planning,
     error,
+    browserWeather,
     runPlan,
     selectedRouteId,
     focused,
@@ -272,11 +273,13 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
                   : plan.provider.weather === 'demo-fallback'
                     ? 'Weather source: Open-Meteo unavailable. Dry placeholders only — not scripted storms.'
                     : `Weather source: ${plan.provider.weather}`}
+              {browserWeather === 'loading' && ' Fetching Open-Meteo from your browser to match a local run…'}
+              {browserWeather === 'failed' && ' Your browser could not reach Open-Meteo either, so the backup forecast stays.'}
             </p>
           )}
           {plan?.provider.weather === 'demo-fallback' && (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
-              Open-Meteo and the MET Norway backup were both unavailable. Risk is scored as calm/dry, so do not
+              Open-Meteo and the backup forecasts were all unavailable. Risk is scored as calm/dry, so do not
               rely on this recommendation. Try again shortly, or check Demo weather and Analyze for scripted storms.
             </div>
           )}

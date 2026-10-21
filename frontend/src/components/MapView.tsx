@@ -47,7 +47,7 @@ import {
   type HeatLayers,
 } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
-import { MAP_STYLES, type Theme } from '../lib/theme'
+import { MAP_FALLBACK_STYLES, MAP_STYLES, type Theme } from '../lib/theme'
 import type { Checkpoint, CorridorResponse, Place, RiskDisplaySlug, Route } from '../types'
 
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -1134,6 +1134,8 @@ export function MapView({
   const modeRef = useRef(mode)
   const hourRef = useRef(heatHour)
   const styleRef = useRef(MAP_STYLES[theme])
+  // Set once OpenFreeMap fails; later theme switches stay on the CARTO styles.
+  const basemapFallbackRef = useRef(false)
   const popupTargetRef = useRef<CheckpointRef | null>(null)
   const tripRef = useRef({ routes, origin, destination, corridor, heatHour, loadLb, departureIso })
   const dataRef = useRef({
@@ -1249,6 +1251,26 @@ export function MapView({
     applyOverlay(map, modeRef.current, hourRef.current)
   }
 
+  function swapStyle(map: MapLibreMap, nextStyle: string) {
+    styleRef.current = nextStyle
+    const keepCamera = map.isStyleLoaded()
+    const camera = keepCamera
+      ? {
+          center: map.getCenter(),
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        }
+      : null
+    map.setStyle(nextStyle)
+    map.once('style.load', () => {
+      hydrateMap(map)
+      if (camera) map.jumpTo(camera)
+      map.resize()
+      setStyleEpoch((value) => value + 1)
+    })
+  }
+
   // --- map construction ---------------------------------------------------
   useEffect(() => {
     if (!containerRef.current) return
@@ -1274,7 +1296,7 @@ export function MapView({
     map.addControl(
       new AttributionControl({
         compact: true,
-        customAttribution: 'OSM · OpenFreeMap · Open-Meteo',
+        customAttribution: 'OSM · OpenFreeMap · CARTO · Open-Meteo',
       }),
       'bottom-right',
     )
@@ -1307,15 +1329,34 @@ export function MapView({
       setReady(true)
     })
 
+    // OpenFreeMap occasionally fails to serve its style or tiles, which leaves
+    // routes floating on a blank canvas. A few basemap errors switch to CARTO.
+    let basemapErrors = 0
+    const switchToFallbackBasemap = () => {
+      if (basemapFallbackRef.current) return
+      basemapFallbackRef.current = true
+      swapStyle(map, MAP_FALLBACK_STYLES[themeRef.current])
+    }
+    const styleTimer = window.setTimeout(() => {
+      if (!map.isStyleLoaded()) switchToFallbackBasemap()
+    }, 12_000)
+
     map.on('error', (event) => {
       const message = event.error?.message ?? 'The map failed to load'
       if (/worker/i.test(message) && !/om:/i.test(message)) {
         setMapError(message)
       }
+      const url = String((event.error as { url?: string } | undefined)?.url ?? '')
+      const sourceId = (event as { sourceId?: string }).sourceId
+      if (url.includes('openfreemap.org') || sourceId === 'openmaptiles') {
+        basemapErrors += 1
+        if (basemapErrors >= 3 || !map.isStyleLoaded()) switchToFallbackBasemap()
+      }
     })
 
     mapRef.current = map
     return () => {
+      window.clearTimeout(styleTimer)
       observer.disconnect()
       popupRef.current?.remove()
       destMarkerRef.current?.remove()
@@ -1329,25 +1370,9 @@ export function MapView({
 
   useEffect(() => {
     const map = mapRef.current
-    const nextStyle = MAP_STYLES[theme]
+    const nextStyle = (basemapFallbackRef.current ? MAP_FALLBACK_STYLES : MAP_STYLES)[theme]
     if (!map || styleRef.current === nextStyle) return
-    styleRef.current = nextStyle
-    const keepCamera = map.isStyleLoaded()
-    const camera = keepCamera
-      ? {
-          center: map.getCenter(),
-          zoom: map.getZoom(),
-          bearing: map.getBearing(),
-          pitch: map.getPitch(),
-        }
-      : null
-    map.setStyle(nextStyle)
-    map.once('style.load', () => {
-      hydrateMap(map)
-      if (camera) map.jumpTo(camera)
-      map.resize()
-      setStyleEpoch((value) => value + 1)
-    })
+    swapStyle(map, nextStyle)
   }, [theme])
 
   // --- data updates -------------------------------------------------------

@@ -7,6 +7,12 @@ export const MAP_STYLES: Record<Theme, string> = {
   dark: 'https://tiles.openfreemap.org/styles/dark',
 }
 
+/** Keyless CARTO basemaps, used when OpenFreeMap's style or tiles fail to load. */
+export const MAP_FALLBACK_STYLES: Record<Theme, string> = {
+  light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+}
+
 export function readStoredTheme(): Theme {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY)

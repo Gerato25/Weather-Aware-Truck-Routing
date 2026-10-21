@@ -24,6 +24,7 @@ from .serializers import (
     WeatherMapRequestSerializer,
     WeatherPointQuerySerializer,
 )
+from .weather.open_meteo import OpenMeteoClient
 from .weather_map import WeatherMapRequest, build_weather_map, inspect_point
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,22 @@ def api_exception_handler(exc, context):
             status=status.HTTP_502_BAD_GATEWAY,
         )
     return exception_handler(exc, context)
+
+
+def _weather_client(data: dict) -> OpenMeteoClient:
+    """Open-Meteo client seeded with any series the browser fetched itself."""
+    prefetch = data.get("open_meteo")
+    if not prefetch:
+        return OpenMeteoClient()
+    return OpenMeteoClient(
+        prefetched=OpenMeteoClient.parse_prefetched(prefetch["points"], prefetch["entries"])
+    )
+
+
+def _with_weather_request(payload: dict, client: OpenMeteoClient, demo_scenario: str) -> dict:
+    """Tell the browser which Open-Meteo series to fetch when the server could not."""
+    payload["weather_request"] = None if demo_scenario else client.browser_request()
+    return payload
 
 
 def _resolve(location: dict, geocoder, field: str) -> Place:
@@ -115,7 +132,10 @@ def plan(request):
         interval_miles=float(data["interval_miles"]),
         demo_scenario=data.get("demo_scenario") or "",
     )
-    return Response(plan_trip(trip))
+    client = _weather_client(data)
+    return Response(
+        _with_weather_request(plan_trip(trip, weather_client=client), client, trip.demo_scenario)
+    )
 
 
 @api_view(["POST"])
@@ -124,6 +144,7 @@ def corridor(request):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
 
+    client = _weather_client(data)
     heatmap = build_heatmap(
         CorridorRequest(
             seeds=data["seeds"],
@@ -141,9 +162,10 @@ def corridor(request):
                 for cell in data.get("demo_storm") or ()
             ),
             route_lines=tuple(tuple(line) for line in data.get("route_lines") or ()),
-        )
+        ),
+        weather_client=client,
     )
-    return Response(heatmap)
+    return Response(_with_weather_request(heatmap, client, data.get("demo_scenario") or ""))
 
 
 @api_view(["POST"])

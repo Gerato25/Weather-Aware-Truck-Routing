@@ -96,8 +96,23 @@ export interface RankingEntry {
   duration_hours: number
 }
 
+/** Open-Meteo series the server could not fetch (its shared IP was rate-limited). */
+export interface WeatherRequest {
+  url: string
+  points: [number, number][]
+  params: Record<string, string>
+  batch_size: number
+}
+
+/** The browser's own Open-Meteo responses, posted back for scoring. */
+export interface OpenMeteoPrefetch {
+  points: [number, number][]
+  entries: Array<{ hourly: Record<string, unknown> }>
+}
+
 export interface PlanResponse {
   generated_at: string
+  weather_request?: WeatherRequest | null
   request: {
     origin: Place
     destination: Place
@@ -152,6 +167,7 @@ export interface CorridorResponse {
   arrows?: { type: 'FeatureCollection'; features: Array<{ properties?: { hour: number; windDir: number; wind: number } }> }
   mask?: { type: 'FeatureCollection'; features: Array<Record<string, unknown>> }
   raster?: WeatherRaster
+  weather_request?: WeatherRequest | null
 }
 
 export interface WeatherMapResponse {

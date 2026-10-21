@@ -77,6 +77,10 @@ TIME_ZONE = "UTC"
 USE_I18N = False
 USE_TZ = True
 
+# Browsers post back the Open-Meteo series they fetched when the server is
+# rate-limited; a long trip's heatmap is a couple of megabytes of JSON.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 

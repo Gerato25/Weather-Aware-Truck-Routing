@@ -1,9 +1,11 @@
 import type {
   CorridorResponse,
+  OpenMeteoPrefetch,
   Place,
   PlanResponse,
   WeatherMapResponse,
   WeatherPointResponse,
+  WeatherRequest,
 } from '../types'
 
 // In development Vite proxies /api to the Django server; in production set
@@ -95,6 +97,46 @@ export interface PlanPayload {
   load_lb: number
   interval_miles: number
   demo_scenario?: '' | 'load_wind'
+  open_meteo?: OpenMeteoPrefetch
+}
+
+// Open-Meteo's free tier rejects overlapping requests from one IP, and the
+// plan and heatmap can both ask at once, so browser fetches run one at a time.
+let openMeteoQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Fetch from Open-Meteo in the browser what the server was refused.
+ *
+ * The free quota is per IP. The server's IP is shared with other Render apps,
+ * but the visitor's is not, so this usually gets the same series a local run
+ * would. Throws on any failure so callers keep the server's fallback result.
+ */
+export function fetchOpenMeteoInBrowser(
+  wanted: WeatherRequest,
+  signal?: AbortSignal,
+): Promise<OpenMeteoPrefetch> {
+  const run = async (): Promise<OpenMeteoPrefetch> => {
+    const entries: OpenMeteoPrefetch['entries'] = []
+    const size = Math.max(1, wanted.batch_size)
+    for (let start = 0; start < wanted.points.length; start += size) {
+      const batch = wanted.points.slice(start, start + size)
+      const params = new URLSearchParams({
+        ...wanted.params,
+        latitude: batch.map(([, lat]) => lat.toFixed(4)).join(','),
+        longitude: batch.map(([lon]) => lon.toFixed(4)).join(','),
+      })
+      const response = await fetch(`${wanted.url}?${params}`, { signal })
+      if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`)
+      const body: unknown = await response.json()
+      const list = (Array.isArray(body) ? body : [body]) as Array<{ hourly?: Record<string, unknown> }>
+      if (list.length !== batch.length) throw new Error('Open-Meteo returned the wrong number of series')
+      for (const entry of list) entries.push({ hourly: entry.hourly ?? {} })
+    }
+    return { points: wanted.points, entries }
+  }
+  const next = openMeteoQueue.then(run, run)
+  openMeteoQueue = next.catch(() => undefined)
+  return next
 }
 
 export function planTrip(payload: PlanPayload, signal?: AbortSignal): Promise<PlanResponse> {
@@ -113,6 +155,7 @@ export function fetchCorridor(
     hours: number
     demo_scenario?: '' | 'load_wind'
     route_lines?: [number, number][][]
+    open_meteo?: OpenMeteoPrefetch
   },
   signal?: AbortSignal,
 ): Promise<CorridorResponse> {

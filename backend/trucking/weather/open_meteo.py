@@ -265,12 +265,24 @@ def _default_fallback():
 class OpenMeteoClient:
     name = "open-meteo"
 
-    def __init__(self, base_url: str | None = None, fallback=_DEFAULT_FALLBACK) -> None:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        fallback=_DEFAULT_FALLBACK,
+        prefetched: dict[Coord, PointForecast] | None = None,
+    ) -> None:
         self.base_url = base_url or settings.OPEN_METEO_BASE_URL
         # Keyless provider used when Open-Meteo answers 429; None disables it.
         self.fallback = _default_fallback() if fallback is _DEFAULT_FALLBACK else fallback
+        # Open-Meteo series the browser fetched for this request only. They are
+        # never written to the shared cache, since the client could alter them.
+        self.prefetched = prefetched or {}
         # Which provider actually served the last ``forecasts`` call.
         self.source = self.name
+        # Points Open-Meteo could not serve during this request, and the widest
+        # forecast window asked for, so the browser can fetch them instead.
+        self.unserved: set[Coord] = set()
+        self.max_days = 0
 
     # -- public API ---------------------------------------------------------
 
@@ -283,9 +295,14 @@ class OpenMeteoClient:
         if not wanted:
             return {}
 
+        self.max_days = max(self.max_days, forecast_days)
+
         results: dict[Coord, PointForecast] = {}
         missing: list[Coord] = []
         for key in wanted:
+            if key in self.prefetched:
+                results[key] = self.prefetched[key]
+                continue
             cached = cache.get(self._cache_key(key, forecast_days))
             if cached is not None:
                 results[key] = cached
@@ -310,9 +327,10 @@ class OpenMeteoClient:
             if not cache.get(_BLOCKED_KEY):
                 backoff = DAILY_LIMIT_BACKOFF_S if _is_daily_limit(exc) else BURST_LIMIT_BACKOFF_S
                 cache.set(_BLOCKED_KEY, True, backoff)
+            remaining = [key for key in missing if key not in results]
+            self.unserved.update(remaining)
             if self.fallback is None:
                 raise
-            remaining = [key for key in missing if key not in results]
             try:
                 results.update(self.fallback.forecasts(remaining, forecast_days))
             except UpstreamError as fallback_exc:
@@ -361,10 +379,36 @@ class OpenMeteoClient:
     def _cache_key(self, coord: Coord, days: int) -> str:
         return f"om:{coord[0]:.4f}:{coord[1]:.4f}:{days}"
 
-    def _fetch_batch(self, coords: list[Coord], forecast_days: int) -> dict[Coord, PointForecast]:
-        params = {
-            "latitude": ",".join(f"{lat:.4f}" for _, lat in coords),
-            "longitude": ",".join(f"{lon:.4f}" for lon, _ in coords),
+    def browser_request(self) -> dict | None:
+        """What the browser should fetch from Open-Meteo to replace the fallback.
+
+        The server's IP shares Open-Meteo's free quota with other tenants; a
+        visitor's browser has its own, so it can usually still get the same
+        series the server would have used.
+        """
+        if not self.unserved:
+            return None
+        return {
+            "url": self.base_url,
+            "points": [[lon, lat] for lon, lat in sorted(self.unserved)],
+            "params": self._params(self.max_days or 3),
+            "batch_size": settings.WEATHER_BATCH_SIZE,
+        }
+
+    @classmethod
+    def parse_prefetched(cls, points: list[Coord], entries: list[dict]) -> dict[Coord, PointForecast]:
+        """Browser-fetched Open-Meteo entries, keyed like ``forecasts`` results."""
+        out: dict[Coord, PointForecast] = {}
+        for point, entry in zip(points, entries):
+            key = snap(point)
+            forecast = cls._parse(key, entry)
+            if forecast.times:
+                out[key] = forecast
+        return out
+
+    @staticmethod
+    def _params(forecast_days: int) -> dict[str, str]:
+        return {
             "hourly": ",".join(HOURLY_VARIABLES),
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",
@@ -374,6 +418,13 @@ class OpenMeteoClient:
             "forecast_days": str(forecast_days),
             "models": "best_match",
             "cell_selection": "nearest",
+        }
+
+    def _fetch_batch(self, coords: list[Coord], forecast_days: int) -> dict[Coord, PointForecast]:
+        params = {
+            "latitude": ",".join(f"{lat:.4f}" for _, lat in coords),
+            "longitude": ",".join(f"{lon:.4f}" for lon, _ in coords),
+            **self._params(forecast_days),
         }
         payload = self._request_with_retry(params)
 
