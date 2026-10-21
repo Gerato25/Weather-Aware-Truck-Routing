@@ -100,10 +100,10 @@ function routeBadgeImage(letter: string, fill: string): ImageData {
   if (!ctx) return new ImageData(size, size)
   ctx.clearRect(0, 0, size, size)
   ctx.beginPath()
-  ctx.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2)
+  ctx.arc(size / 2, size / 2, size * 0.46, 0, Math.PI * 2)
   ctx.fillStyle = fill
   ctx.fill()
-  ctx.lineWidth = size * 0.08
+  ctx.lineWidth = size * 0.07
   ctx.strokeStyle = '#ffffff'
   ctx.stroke()
   ctx.fillStyle = '#ffffff'
@@ -121,7 +121,7 @@ export function registerRouteBadges(map: MapLibreMap, theme: 'light' | 'dark' = 
   const palette = theme === 'dark' ? ROUTE_COLORS_DARK : ROUTE_COLORS
   ROUTE_LETTERS.forEach((letter, index) => {
     const id = `route-${letter}`
-    if (map.hasImage(id)) return
+    if (map.hasImage(id)) map.removeImage(id)
     map.addImage(id, routeBadgeImage(letter, palette[index] ?? palette[0]), { pixelRatio: 2 })
   })
 }

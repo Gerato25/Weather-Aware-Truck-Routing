@@ -115,20 +115,29 @@ ETA scores do not change when you move the slider.
 
 ## Run locally
 
-Python 3.12+ and Node 20+.
+Python 3.12+ and Node 20+. Use **two terminals**. Leave both running.
+
+`python manage.py` by itself only prints Django’s command list. You must pass **`runserver`**.
+
+### Terminal 1 — API
 
 ```powershell
-# Terminal 1 — API
 cd backend
-python manage.py runserver
+python -m pip install -r requirements.txt
+python manage.py runserver 8000
+```
 
-# Terminal 2 — UI
+Success looks like: `Starting development server at http://127.0.0.1:8000/`.
+
+### Terminal 2 — UI
+
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173) → **Trip Planner** (`/plan`). Vite proxies `/api` to Django.
+Success looks like Vite on [http://127.0.0.1:5173](http://127.0.0.1:5173). Open that URL → **Trip Planner** (`/plan`). Vite proxies `/api` to Django on port 8000.
 
 Optional: `OPENROUTESERVICE_API_KEY` in `backend/.env` ([free key](https://openrouteservice.org/dev/#/signup)).
 

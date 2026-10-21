@@ -2438,6 +2438,10 @@ input[type='range']::-webkit-slider-runnable-track {
   color: #475569;
 }
 
+.checkpoint-popup {
+  z-index: 30 !important;
+}
+
 .checkpoint-popup .maplibregl-popup-content {
   padding: 0;
   border-radius: 14px;
@@ -2453,25 +2457,21 @@ input[type='range']::-webkit-slider-runnable-track {
 }
 
 .checkpoint-popup .maplibregl-popup-close-button {
+  z-index: 2;
   color: var(--text-faint);
-  font-size: 17px;
-  padding: 2px 7px;
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  line-height: 22px;
+  padding: 0;
 }
 
 .popup {
-  width: 280px;
+  box-sizing: border-box;
+  width: 260px;
+  max-width: 100%;
   font-family: inherit;
   color: var(--text);
-}
-
-.popup.is-collapsed {
-  width: auto;
-  min-width: 9.5rem;
-  cursor: pointer;
-}
-
-.popup.is-collapsed .popup-head {
-  padding: 6px 28px 6px 10px;
 }
 
 .popup-head {
@@ -2479,10 +2479,11 @@ input[type='range']::-webkit-slider-runnable-track {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px 8px;
+  padding: 10px 28px 8px 12px;
 }
 
 .popup-mile {
+  min-width: 0;
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
@@ -2492,6 +2493,7 @@ input[type='range']::-webkit-slider-runnable-track {
 .popup-level {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 10px;
@@ -2501,39 +2503,56 @@ input[type='range']::-webkit-slider-runnable-track {
   white-space: nowrap;
 }
 
-.popup-overlay-label {
+.popup-section-label {
   margin: 0;
-  padding: 2px 12px 4px;
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  padding: 4px 12px 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.popup-section-time {
+  margin: 0;
+  padding: 1px 12px 6px;
+  font-size: 11px;
+  line-height: 1.35;
   color: var(--text-faint);
 }
 
 .popup-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px 12px;
+  gap: 8px 12px;
   margin: 0;
-  padding: 0 12px 8px;
+  padding: 0 12px 10px;
 }
 
 .popup-grid div {
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .popup-grid dt {
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--text-faint);
 }
 
 .popup-grid dd {
   margin: 0;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.popup-note {
+  margin: 0;
+  padding: 0 12px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
 }
 
 .popup-risk {

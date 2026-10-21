@@ -19,12 +19,10 @@ import { RouteCompareStrip, RouteDetails } from '../components/dashboard/RouteDe
 import type { useTripSession } from '../hooks/useTripSession'
 import type { Page } from '../lib/navigation'
 import type { Theme } from '../lib/theme'
-import { nearestCorridorIndex } from '../lib/corridorHour'
 import { formatForecastStamp } from '../lib/format'
 import type { OverlayMode } from '../lib/corridorHeat'
 import { RISK_COLORS, RISK_INK, RISK_LABELS, RISK_LEVELS, routeColor } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
-import type { Checkpoint, CorridorResponse, Route } from '../types'
 
 type Session = ReturnType<typeof useTripSession>
 
@@ -44,58 +42,6 @@ function overlayTimestamp(departure: string | undefined, hour: number, hours: st
   if (!departure) return null
   const ms = new Date(departure).getTime() + hour * 3_600_000
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null
-}
-
-function pickCheckpoint(route: { checkpoints: Checkpoint[] }): Checkpoint | null {
-  const points = route.checkpoints
-  if (!points.length) return null
-  const inner = points.length > 2 ? points.slice(1, -1) : points
-  const ranked = [...inner].sort((a, b) => b.risk.score - a.risk.score)
-  if (ranked[0] && ranked[0].risk.score > 0) return ranked[0]
-  return inner[Math.floor(inner.length / 2)] ?? points[0]
-}
-
-const SNOW_SELECT = 0.01
-const RAIN_SELECT = 0.1
-
-function valueAtHour(
-  rows: (number | null)[][] | undefined,
-  cell: number,
-  hour: number,
-  min: number,
-): number | null {
-  const value = rows?.[cell]?.[hour]
-  if (value == null || !Number.isFinite(value) || value < min) return null
-  return value
-}
-
-/** Precip the truck actually meets at a stop’s ETA — not weather after arrival. */
-function pickWeatherRegion(
-  routes: Route[],
-  corridor: CorridorResponse | null,
-): { routeId: string; index: number; hour: number; mode: 'snow' | 'rain' } | null {
-  if (!corridor?.points.length) return null
-  let snowBest: { routeId: string; index: number; hour: number; peak: number } | null = null
-  let rainBest: { routeId: string; index: number; hour: number; peak: number } | null = null
-  for (const route of routes) {
-    const arriveHour = Math.max(0, Math.ceil(route.summary.duration_hours))
-    for (const checkpoint of route.checkpoints) {
-      const hour = Math.max(0, Math.min(arriveHour, Math.round(checkpoint.elapsed_minutes / 60)))
-      const cell = nearestCorridorIndex(corridor.points, checkpoint.lon, checkpoint.lat)
-      const snow = valueAtHour(corridor.snow, cell, hour, SNOW_SELECT)
-      if (snow != null && (!snowBest || snow > snowBest.peak)) {
-        snowBest = { routeId: route.id, index: checkpoint.index, hour, peak: snow }
-      }
-      const rain = valueAtHour(corridor.rain, cell, hour, RAIN_SELECT)
-      if (rain != null && (!rainBest || rain > rainBest.peak)) {
-        rainBest = { routeId: route.id, index: checkpoint.index, hour, peak: rain }
-      }
-    }
-  }
-  if (snowBest && snowBest.peak >= 0.5) return { ...snowBest, mode: 'snow' }
-  if (rainBest) return { ...rainBest, mode: 'rain' }
-  if (snowBest) return { ...snowBest, mode: 'snow' }
-  return null
 }
 
 export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps) {
@@ -133,25 +79,14 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
       setFocused(null)
       return
     }
-    if (!corridor) return
     if (snowInitFor.current === plan.generated_at) return
     snowInitFor.current = plan.generated_at
-    const weather = pickWeatherRegion(plan.routes, corridor)
-    if (weather) {
-      setOverlayMode('all')
-      setPanToFocused(true)
-      selectRoute(weather.routeId)
-      setFocused({ routeId: weather.routeId, index: weather.index })
-      setHeatHour(weather.hour)
-      return
-    }
     setOverlayMode('all')
     setPanToFocused(false)
-    const route =
-      plan.routes.find((item) => item.id === plan.recommendation.route_id) ?? plan.routes[0]
-    const checkpoint = route ? pickCheckpoint(route) : null
-    setFocused(checkpoint ? { routeId: route.id, index: checkpoint.index } : null)
-  }, [plan, plan?.generated_at, corridor, selectRoute, setFocused, setHeatHour])
+    setFocused(null)
+    setHeatHour(0)
+    selectRoute(plan.recommendation.route_id)
+  }, [plan, plan?.generated_at, selectRoute, setFocused, setHeatHour])
 
   const revealRoute = useCallback(
     (routeId: string) => {
@@ -164,12 +99,10 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
   const handleSelectRoute = useCallback(
     (routeId: string) => {
       revealRoute(routeId)
-      const route = plan?.routes.find((item) => item.id === routeId)
-      const checkpoint = route ? pickCheckpoint(route) : null
       setPanToFocused(false)
-      setFocused(checkpoint ? { routeId, index: checkpoint.index } : null)
+      setFocused(null)
     },
-    [plan, revealRoute, setFocused],
+    [revealRoute, setFocused],
   )
 
   const handleFocusCheckpoint = useCallback(
@@ -191,10 +124,8 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
         if (!remaining.length) return current
         if (routeId === selectedRouteId) {
           selectRoute(remaining[0].id)
-          const next = plan?.routes.find((item) => item.id === remaining[0].id)
-          const checkpoint = next ? pickCheckpoint(next) : null
           setPanToFocused(false)
-          setFocused(checkpoint ? { routeId: remaining[0].id, index: checkpoint.index } : null)
+          setFocused(null)
         }
         return [...current, routeId]
       })
@@ -294,9 +225,13 @@ export function DashboardPage({ session, theme, onNavigate }: DashboardPageProps
                 id="interval"
                 value={form.intervalMiles}
                 className={dashControlClass}
-                onChange={(event) =>
-                  updateField('intervalMiles', Number(event.target.value) as 10 | 25 | 50)
-                }
+                onChange={(event) => {
+                  const intervalMiles = Number(event.target.value) as 10 | 25 | 50
+                  updateField('intervalMiles', intervalMiles)
+                  if (plan && form.origin.trim().length > 1 && form.destination.trim().length > 1) {
+                    void runPlan({ ...form, intervalMiles })
+                  }
+                }}
               >
                 {INTERVALS.map((interval) => (
                   <option key={interval} value={interval}>

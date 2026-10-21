@@ -26,10 +26,9 @@ import {
 } from '../lib/corridorHeat'
 import { addWeatherRaster, type WeatherRasterHandle } from '../map/weatherRaster'
 import { syncDestinationMarker } from '../lib/destinationMarker'
-import { syncRouteCardMarkers } from '../lib/mapRouteCards'
 import { setWeatherHour } from '../lib/weatherArea'
 import { corridorSampleAt, overlayLevelAt } from '../lib/corridorHour'
-import { compassFromDeg, formatClock, formatEtaRelative, formatForecastStamp } from '../lib/format'
+import { compassFromDeg, formatForecastStamp } from '../lib/format'
 import { truckAtHour } from '../lib/truckAtHour'
 import {
   OM_LAYER_IDS,
@@ -43,6 +42,9 @@ import {
   HIDDEN_HEAT_LAYERS,
   RISK_COLORS,
   RISK_LABELS,
+  classifyRain,
+  classifySnow,
+  classifyWind,
   riskColor,
   routeColor,
   routeLineColor,
@@ -50,7 +52,7 @@ import {
 } from '../lib/risk'
 import { routeLetter } from '../lib/routeMeta'
 import { MAP_STYLES, type Theme } from '../lib/theme'
-import type { Checkpoint, CorridorResponse, Place, Route } from '../types'
+import type { Checkpoint, CorridorResponse, Place, RiskDisplaySlug, Route } from '../types'
 
 import 'maplibre-gl/dist/maplibre-gl.css'
 
@@ -96,6 +98,7 @@ const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', feature
 
 const POPUP_OPTIONS = {
   closeButton: true,
+  closeOnClick: false,
   className: 'checkpoint-popup',
   maxWidth: '320px',
   offset: 12,
@@ -198,6 +201,7 @@ function routesToGeoJSON(
     const identityLine = routeLineColor(index, theme, selected)
     const checkpoints = route.checkpoints
     const colorFor = (lon: number, lat: number, fallback: typeof checkpoints[number]['risk']['level']) => {
+      if (!selected) return identity
       if (mode === 'off') return identityLine
       return riskColor(overlayLevelAt(corridor, lon, lat, hour, mode, fallback))
     }
@@ -256,6 +260,7 @@ function routeLabelsToGeoJSON(
   routes: Route[],
   hiddenIds: Set<string>,
   theme: Theme = 'light',
+  selectedRouteId: string | null = null,
 ): FeatureCollection {
   const features: Feature[] = []
   const fractions = [0.14, 0.38, 0.62, 0.86]
@@ -264,6 +269,7 @@ function routeLabelsToGeoJSON(
     const coords = route.geometry.coordinates
     if (!coords.length) return
     const letter = routeLetter(index)
+    const selected = route.id === selectedRouteId
     const color = routeColor(index, theme)
     const latShift = (index - 1) * 0.16
     for (const t of fractions) {
@@ -271,7 +277,7 @@ function routeLabelsToGeoJSON(
       features.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lon, lat + latShift] },
-        properties: { letter, color },
+        properties: { letter, color, selected },
       })
     }
   })
@@ -457,6 +463,28 @@ function popupNumber(value: number | null | undefined, digits: number, suffix: s
   return `${value.toFixed(digits)}${suffix}`
 }
 
+function riskPill(level: RiskDisplaySlug, label: string): string {
+  const ink = level === 'MODERATE' || level === 'UNKNOWN' ? '#0f172a' : '#ffffff'
+  return `<span class="popup-level" style="background:${riskColor(level)};color:${ink}">${escapeHtml(label)}</span>`
+}
+
+function overlayReason(overlay: NonNullable<ReturnType<typeof corridorSampleAt>>): string {
+  const rain = overlay.rain ?? 0
+  const snow = overlay.snow ?? 0
+  const wind = overlay.wind ?? 0
+  if (overlay.level === 'LOW') return 'All conditions within Low thresholds.'
+  if (overlay.cause === 'rain' || classifyRain(rain) === overlay.level) {
+    return `Rain ${rain.toFixed(2)} in/hr — ${RISK_LABELS[overlay.level]}`
+  }
+  if (overlay.cause === 'snow' || classifySnow(snow) === overlay.level) {
+    return `Snow ${snow.toFixed(1)} in/hr — ${RISK_LABELS[overlay.level]}`
+  }
+  if (overlay.cause === 'wind' || classifyWind(wind) === overlay.level) {
+    return `Wind ${Math.round(wind)} mph — ${RISK_LABELS[overlay.level]}`
+  }
+  return `${RISK_LABELS[overlay.level]} at this map hour.`
+}
+
 function checkpointPopupHtml(
   cp: Checkpoint,
   name?: string,
@@ -464,81 +492,46 @@ function checkpointPopupHtml(
   hour?: number,
   overlayAt?: string | null,
   loadLb?: number,
-  departureIso?: string | null,
-  expanded = false,
+  _departureIso?: string | null,
 ): string {
   const { weather, risk } = cp
   const title = name || `Mile ${Math.round(cp.mile)}`
-  const etaWind = popupNumber(weather.wind_mph, 0, ' mph')
-  const etaGusts =
-    weather.wind_gust_mph == null || Number.isNaN(weather.wind_gust_mph)
-      ? ''
-      : ` / gusts ${Math.round(weather.wind_gust_mph)}`
-  const dir = weather.wind_dir ?? compassFromDeg(weather.wind_dir_deg)
-  const etaRelative = formatEtaRelative(cp.eta, departureIso)
-  const loadRule = risk.reasons.find((reason) => /load/i.test(reason))
-  const reason = risk.reasons[0]
-    ? escapeHtml(risk.reasons[0])
-    : risk.available === false
-      ? 'Weather data was unavailable; this checkpoint was not scored as Low.'
-      : 'All conditions within Low thresholds.'
-
-  const overlayStamp =
-    overlayAt && Number.isFinite(hour)
-      ? `+${hour}h · ${escapeHtml(formatForecastStamp(overlayAt))}`
-      : Number.isFinite(hour)
-        ? `+${hour}h`
-        : 'this hour'
+  const sliderHour = Number.isFinite(hour) ? Math.round(Number(hour)) : 0
+  const hourLabel = `+${sliderHour}h`
+  const overlayWhen = overlayAt ? escapeHtml(formatForecastStamp(overlayAt)) : ''
   const overlayDir = overlay?.windDir != null ? compassFromDeg(overlay.windDir) : null
-  const shownLevel = overlay?.level ?? risk.level
-  const shownLabel = overlay ? RISK_LABELS[overlay.level] : risk.label
-  const pillInk = shownLevel === 'MODERATE' || shownLevel === 'UNKNOWN' ? '#0f172a' : '#ffffff'
-  const overlayRows = overlay
-    ? `
-      <p class="popup-overlay-label">This location · ${overlayStamp}</p>
-      <dl class="popup-grid">
-        <div><dt>Wind</dt><dd>${popupNumber(overlay.wind, 0, ' mph')}${overlayDir ? ` ${escapeHtml(overlayDir)}` : ''}</dd></div>
-        <div><dt>Rain</dt><dd>${popupNumber(overlay.rain, 2, ' in/hr')}</dd></div>
-        <div><dt>Snow</dt><dd>${popupNumber(overlay.snow, 1, ' in/hr')}</dd></div>
-        <div><dt>Risk</dt><dd>${escapeHtml(RISK_LABELS[overlay.level])}</dd></div>
-      </dl>
-    `
-    : ''
-
-  const loadLine =
-    loadRule && loadLb
-      ? `<span>Load rule: ${escapeHtml(loadRule)}</span>`
-      : loadLb
-        ? `<span>Load: ${Math.round(loadLb).toLocaleString()} lb</span>`
-        : ''
-
-  if (!expanded) {
-    return `
-      <div class="popup is-collapsed" role="button" tabindex="0">
-        <div class="popup-head">
-          <span class="popup-mile">${escapeHtml(title)}</span>
-          <span class="popup-level" style="background:${riskColor(shownLevel)};color:${pillInk}">${escapeHtml(shownLabel)}</span>
-        </div>
-      </div>
-    `
-  }
+  const level = overlay?.level ?? risk.level
+  const label = overlay ? RISK_LABELS[overlay.level] : risk.label
+  const pill = riskPill(level, label)
+  const reason = overlay
+    ? escapeHtml(overlayReason(overlay))
+    : escapeHtml(
+        risk.reasons[0] ??
+          (risk.available === false
+            ? 'Weather data was unavailable; this checkpoint was not scored as Low.'
+            : 'All conditions within Low thresholds.'),
+      )
+  const loadLine = loadLb ? `<span>Load: ${Math.round(loadLb).toLocaleString()} lb</span>` : ''
+  const wind = overlay ? popupNumber(overlay.wind, 0, ' mph') : popupNumber(weather.wind_mph, 0, ' mph')
+  const rain = overlay ? popupNumber(overlay.rain, 2, ' in/hr') : popupNumber(weather.rain_in_hr, 2, ' in/hr')
+  const snow = overlay ? popupNumber(overlay.snow, 1, ' in/hr') : popupNumber(weather.snow_in_hr, 1, ' in/hr')
+  const windExtra = overlayDir ? ` ${escapeHtml(overlayDir)}` : ''
 
   return `
     <div class="popup">
       <div class="popup-head">
         <span class="popup-mile">${escapeHtml(title)}</span>
-        <span class="popup-level" style="background:${riskColor(shownLevel)};color:${pillInk}">${escapeHtml(shownLabel)}</span>
+        ${pill}
       </div>
-      ${overlayRows}
-      <p class="popup-overlay-label">ETA ${escapeHtml(etaRelative ?? formatClock(cp.eta))} · ${escapeHtml(formatClock(cp.eta))}</p>
+      <p class="popup-section-label">This location · ${hourLabel}</p>
+      ${overlayWhen ? `<p class="popup-section-time">${overlayWhen}</p>` : ''}
       <dl class="popup-grid">
-        <div><dt>Wind</dt><dd>${etaWind}${etaWind === '—' ? '' : etaGusts}${dir ? ` ${escapeHtml(dir)}` : ''}</dd></div>
-        <div><dt>Rain</dt><dd>${popupNumber(weather.rain_in_hr, 2, ' in/hr')}</dd></div>
-        <div><dt>Snow</dt><dd>${popupNumber(weather.snow_in_hr, 1, ' in/hr')}</dd></div>
-        <div><dt>Risk</dt><dd>${escapeHtml(risk.label)}</dd></div>
+        <div><dt>Wind</dt><dd>${wind}${windExtra}</dd></div>
+        <div><dt>Rain</dt><dd>${rain}</dd></div>
+        <div><dt>Snow</dt><dd>${snow}</dd></div>
+        <div><dt>Risk</dt><dd>${escapeHtml(label)}</dd></div>
       </dl>
-      <p class="popup-risk" style="--level-color:${riskColor(risk.level)}">
-        <strong>ETA risk: ${escapeHtml(risk.label)}</strong>
+      <p class="popup-risk" style="--level-color:${riskColor(level)}">
         <span>Reason: ${reason}</span>
         ${loadLine}
       </p>
@@ -597,7 +590,23 @@ function tuneDarkBasemap(map: MapLibreMap) {
 }
 
 function addLayer(map: MapLibreMap, layer: Parameters<MapLibreMap['addLayer']>[0]) {
-  if (!map.getLayer(layer.id)) map.addLayer(layer)
+  if (!map.getLayer(layer.id)) {
+    map.addLayer(layer)
+    return
+  }
+  if ('filter' in layer && layer.filter) {
+    map.setFilter(layer.id, layer.filter)
+  }
+  if ('layout' in layer && layer.layout) {
+    for (const [key, value] of Object.entries(layer.layout)) {
+      map.setLayoutProperty(layer.id, key, value as never)
+    }
+  }
+  if ('paint' in layer && layer.paint) {
+    for (const [key, value] of Object.entries(layer.paint)) {
+      map.setPaintProperty(layer.id, key, value as never)
+    }
+  }
 }
 
 function installWeatherRasters(map: MapLibreMap, timeStep: string) {
@@ -686,11 +695,11 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         ['linear'],
         ['zoom'],
         4,
-        ['case', ['get', 'selected'], 10, 7],
+        ['case', ['get', 'selected'], 8, 3.4],
         10,
-        ['case', ['get', 'selected'], 15, 11],
+        ['case', ['get', 'selected'], 12, 5],
       ],
-      'line-opacity': theme === 'light' ? 0.55 : 0.7,
+      'line-opacity': ['case', ['get', 'selected'], theme === 'light' ? 0.55 : 0.7, 0.55],
     },
   })
 
@@ -706,11 +715,11 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
         ['linear'],
         ['zoom'],
         4,
-        ['case', ['get', 'selected'], 5.5, 3.8],
+        ['case', ['get', 'selected'], 5, 2.4],
         10,
-        ['case', ['get', 'selected'], 9, 6],
+        ['case', ['get', 'selected'], 7.5, 3.6],
       ],
-      'line-opacity': 1,
+      'line-opacity': ['case', ['get', 'selected'], 1, 0.9],
     },
   })
 
@@ -736,19 +745,20 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     type: 'circle',
     source: SOURCES.checkpoints,
     filter: ['==', ['get', 'elevated'], 0],
+    layout: { visibility: 'visible' },
     paint: {
-      'circle-color': riskColorExpression,
+      'circle-color': ['case', ['get', 'selected'], RISK_COLORS.LOW, ['get', 'identity']],
       'circle-radius': [
         'interpolate',
         ['linear'],
         ['zoom'],
         4,
-        ['case', ['get', 'selected'], 4.4, 3.2],
+        ['case', ['get', 'selected'], 5.5, 3.2],
         11,
-        ['case', ['get', 'selected'], 6.8, 5],
+        ['case', ['get', 'selected'], 8, 4.5],
       ],
-      'circle-opacity': ['case', ['get', 'selected'], 1, 0.92],
-      'circle-stroke-width': ['case', ['get', 'selected'], 2.2, 1.6],
+      'circle-opacity': ['case', ['get', 'selected'], 1, 0.75],
+      'circle-stroke-width': 2,
       'circle-stroke-color': '#ffffff',
     },
   })
@@ -759,17 +769,17 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     source: SOURCES.checkpoints,
     filter: ['==', ['get', 'elevated'], 1],
     paint: {
-      'circle-color': riskColorExpression,
+      'circle-color': ['case', ['get', 'selected'], riskColorExpression, ['get', 'identity']],
       'circle-radius': [
         'interpolate',
         ['linear'],
         ['zoom'],
         4,
-        ['case', ['get', 'selected'], 8, 6.5],
+        ['case', ['get', 'selected'], 8, 4],
         11,
-        ['case', ['get', 'selected'], 12, 10],
+        ['case', ['get', 'selected'], 12, 6],
       ],
-      'circle-opacity': 1,
+      'circle-opacity': ['case', ['get', 'selected'], 1, 0.75],
       'circle-stroke-width': 2,
       'circle-stroke-color': '#ffffff',
     },
@@ -779,7 +789,12 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     id: LAYERS.checkpointCause,
     type: 'symbol',
     source: SOURCES.checkpoints,
-    filter: ['all', ['==', ['get', 'elevated'], 1], ['in', ['get', 'cause'], ['literal', ['wind', 'rain', 'snow']]]],
+    filter: [
+      'all',
+      ['==', ['get', 'elevated'], 1],
+      ['get', 'selected'],
+      ['in', ['get', 'cause'], ['literal', ['wind', 'rain', 'snow']]],
+    ],
     layout: {
       'icon-image': ['get', 'cause'],
       'icon-rotate': [
@@ -806,6 +821,7 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     minzoom: DETAIL_MIN_ZOOM,
     filter: ['all', ['==', ['get', 'elevated'], 0], ['==', ['get', 'hasDir'], 1]],
     layout: {
+      visibility: 'none',
       'icon-image': CAUSE_ICONS.wind,
       'icon-rotate': WIND_ICON_ROTATE,
       'icon-rotation-alignment': 'map',
@@ -914,11 +930,25 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
     type: 'symbol',
     source: SOURCES.routeLabels,
     layout: {
+      visibility: 'none',
       'icon-image': ['concat', 'route-', ['get', 'letter']],
-      'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.62, 8, 0.82, 12, 0.7],
+      'icon-size': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        3,
+        ['case', ['get', 'selected'], 0.62, 0.48],
+        8,
+        ['case', ['get', 'selected'], 0.82, 0.58],
+        12,
+        ['case', ['get', 'selected'], 0.7, 0.52],
+      ],
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       'icon-anchor': 'center',
+    },
+    paint: {
+      'icon-opacity': ['case', ['get', 'selected'], 1, 0.85],
     },
   })
 
@@ -955,45 +985,46 @@ function installLayers(map: MapLibreMap, theme: Theme, mode: OverlayMode) {
 }
 
 interface InteractionHandlers {
+  selectedRouteId: () => string | null
   onCheckpointClick: (ref: CheckpointRef, coordinates: [number, number]) => void
-  onCheckpointHover: (ref: CheckpointRef, coordinates: [number, number]) => void
-  onCheckpointLeave: () => void
   onRouteClick: (routeId: string) => void
 }
 
+function preferSelectedRoute<T extends { properties?: { routeId?: unknown } | null }>(
+  features: T[],
+  selectedId: string | null,
+): T | undefined {
+  if (selectedId) {
+    const match = features.find((feature) => feature.properties?.routeId === selectedId)
+    if (match) return match
+  }
+  return features[0]
+}
+
 function installInteractions(map: MapLibreMap, handlers: InteractionHandlers) {
-  const readRef = (event: MapLayerMouseEvent): { ref: CheckpointRef; coordinates: [number, number] } | null => {
-    const feature = event.features?.[0]
-    if (!feature) return null
+  const readCheckpoint = (
+    features: Array<{ properties?: { routeId?: unknown; index?: unknown } | null; geometry?: Point | { type?: string; coordinates?: unknown } }>,
+  ): { ref: CheckpointRef; coordinates: [number, number] } | null => {
+    const feature = preferSelectedRoute(features, handlers.selectedRouteId())
+    if (!feature?.properties) return null
     const { routeId, index } = feature.properties as Record<string, string>
     if (typeof routeId !== 'string') return null
-    const coordinates = (feature.geometry as Point).coordinates as [number, number]
-    return { ref: { routeId, index: Number(index) }, coordinates }
+    const coordinates = (feature.geometry as Point | undefined)?.coordinates as [number, number] | undefined
+    return { ref: { routeId, index: Number(index) }, coordinates: coordinates ?? [0, 0] }
   }
 
-  const openCheckpoint = (event: MapLayerMouseEvent) => {
-    const hit = readRef(event)
-    if (hit) handlers.onCheckpointClick(hit.ref, hit.coordinates)
-  }
-
-  const hoverCheckpoint = (event: MapLayerMouseEvent) => {
-    const hit = readRef(event)
-    if (hit) handlers.onCheckpointHover(hit.ref, hit.coordinates)
-  }
-
-  for (const layer of CHECKPOINT_HIT_LAYERS) {
-    map.on('click', layer, openCheckpoint)
-    map.on('mousemove', layer, hoverCheckpoint)
-    map.on('mouseleave', layer, () => handlers.onCheckpointLeave())
-  }
-
-  map.on('click', LAYERS.routeLine, (event: MapLayerMouseEvent) => {
-    const onCheckpoint = map.queryRenderedFeatures(event.point, {
+  map.on('click', (event: MapLayerMouseEvent) => {
+    const checkpointHits = map.queryRenderedFeatures(event.point, {
       layers: [...CHECKPOINT_HIT_LAYERS],
     })
-    if (onCheckpoint.length) return
-
-    const routeId = event.features?.[0]?.properties?.routeId
+    if (checkpointHits.length) {
+      const hit = readCheckpoint(checkpointHits)
+      if (hit) handlers.onCheckpointClick(hit.ref, hit.coordinates)
+      return
+    }
+    const routeHits = map.queryRenderedFeatures(event.point, { layers: [LAYERS.routeLine] })
+    const feature = preferSelectedRoute(routeHits, handlers.selectedRouteId())
+    const routeId = feature?.properties?.routeId
     if (typeof routeId === 'string') handlers.onRouteClick(routeId)
   })
 
@@ -1038,7 +1069,7 @@ export function MapView({
   heatLayers = HIDDEN_HEAT_LAYERS,
   overlayMode,
   focused,
-  panToFocused = true,
+  panToFocused = false,
   hiddenRouteIds = [],
   basemap = 'map',
   hideEmpty = false,
@@ -1057,11 +1088,8 @@ export function MapView({
   const mapRef = useRef<MapLibreMap | null>(null)
   const popupRef = useRef<Popup | null>(null)
   const popupPinnedRef = useRef(false)
-  const popupExpandedRef = useRef(false)
   const destMarkerRef = useRef<Marker | null>(null)
-  const routeCardMarkersRef = useRef<Marker[]>([])
   const wxRef = useRef<WeatherRasterHandle | null>(null)
-  const hoverHideRef = useRef<number | null>(null)
   const [ready, setReady] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
   const [styleEpoch, setStyleEpoch] = useState(0)
@@ -1071,11 +1099,13 @@ export function MapView({
   const selectRouteRef = useRef(onSelectRoute)
   const focusRef = useRef(onFocusCheckpoint)
   const weatherCatalogRef = useRef(onWeatherCatalog)
+  const selectedIdRef = useRef(selectedRouteId)
   useEffect(() => {
     selectRouteRef.current = onSelectRoute
     focusRef.current = onFocusCheckpoint
     weatherCatalogRef.current = onWeatherCatalog
-  }, [onSelectRoute, onFocusCheckpoint, onWeatherCatalog])
+    selectedIdRef.current = selectedRouteId
+  }, [onSelectRoute, onFocusCheckpoint, onWeatherCatalog, selectedRouteId])
 
   const hiddenIds = useMemo(() => new Set(hiddenRouteIds), [hiddenRouteIds])
   const mode = overlayMode ?? overlayFromHeatLayers(heatLayers)
@@ -1086,8 +1116,8 @@ export function MapView({
     [routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour, mode],
   )
   const routeLabelData = useMemo(
-    () => routeLabelsToGeoJSON(routes, hiddenIds, theme),
-    [routes, hiddenIds, theme],
+    () => routeLabelsToGeoJSON(routes, hiddenIds, theme, selectedRouteId),
+    [routes, hiddenIds, theme, selectedRouteId],
   )
   const checkpointData = useMemo(
     () => checkpointsToGeoJSON(routes, selectedRouteId, hiddenIds, theme, corridor, overlayHour),
@@ -1146,7 +1176,6 @@ export function MapView({
 
   function popupForRef(
     ref: CheckpointRef,
-    expanded = popupExpandedRef.current,
   ): { coordinates: [number, number]; html: string } | null {
     const trip = tripRef.current
     const route = trip.routes.find((item) => item.id === ref.routeId)
@@ -1162,41 +1191,26 @@ export function MapView({
         cp,
         checkpointName(route, cp, trip.origin, trip.destination),
         overlay,
-        trip.heatHour,
+        Math.round(trip.heatHour),
         trip.corridor?.hours[Math.round(trip.heatHour)] ?? null,
         trip.loadLb,
         trip.departureIso,
-        expanded,
       ),
     }
   }
 
-  function bindCollapsedPopupExpand(popup: Popup, ref: CheckpointRef) {
-    const root = popup.getElement()?.querySelector('.popup.is-collapsed')
-    if (!(root instanceof HTMLElement)) return
-    const expand = () => {
-      popupExpandedRef.current = true
-      const next = popupForRef(ref, true)
-      if (next) popup.setHTML(next.html)
-    }
-    root.addEventListener('click', (event) => {
-      event.stopPropagation()
-      expand()
-    })
-    root.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return
-      event.preventDefault()
-      expand()
-    })
+  function markPopupOpen(open: boolean) {
+    mapRef.current?.getContainer().classList.toggle('has-checkpoint-popup', open)
   }
 
   function showPopup(map: MapLibreMap, coordinates: [number, number], html: string, pinned: boolean) {
     popupRef.current?.remove()
     popupPinnedRef.current = pinned
+    markPopupOpen(pinned)
     popupRef.current = new Popup({
       ...POPUP_OPTIONS,
       closeButton: pinned,
-      maxWidth: html.includes('is-collapsed') ? '240px' : '320px',
+      maxWidth: '280px',
     })
       .setLngLat(coordinates)
       .setHTML(html)
@@ -1204,12 +1218,9 @@ export function MapView({
     if (pinned) {
       popupRef.current.on('close', () => {
         popupPinnedRef.current = false
-        popupExpandedRef.current = false
         popupTargetRef.current = null
+        markPopupOpen(false)
       })
-    }
-    if (popupTargetRef.current && html.includes('is-collapsed')) {
-      bindCollapsedPopupExpand(popupRef.current, popupTargetRef.current)
     }
     return popupRef.current
   }
@@ -1292,40 +1303,24 @@ export function MapView({
       map.resize()
       hydrateMap(map)
       installInteractions(map, {
+        selectedRouteId: () => selectedIdRef.current,
         onCheckpointClick: (ref, coordinates) => {
           selectRouteRef.current(ref.routeId)
-          const same = popupPinnedRef.current && popupTargetRef.current?.routeId === ref.routeId && popupTargetRef.current.index === ref.index
-          popupExpandedRef.current = same ? !popupExpandedRef.current : true
           popupTargetRef.current = ref
-          const popup = popupForRef(ref, popupExpandedRef.current)
+          const popup = popupForRef(ref)
           showPopup(map, coordinates, popup?.html ?? '', true).on('close', () => {
             popupPinnedRef.current = false
-            popupExpandedRef.current = false
             popupTargetRef.current = null
             focusRef.current(null)
           })
           focusRef.current(ref)
         },
-        onCheckpointHover: (ref, coordinates) => {
-          if (hoverHideRef.current != null) {
-            window.clearTimeout(hoverHideRef.current)
-            hoverHideRef.current = null
-          }
-          if (popupPinnedRef.current) return
-          const popup = popupForRef(ref, false)
-          if (popup) showPopup(map, coordinates, popup.html, false)
-        },
-        onCheckpointLeave: () => {
-          if (popupPinnedRef.current) return
-          hoverHideRef.current = window.setTimeout(() => {
-            if (popupPinnedRef.current) return
-            popupRef.current?.remove()
-            popupRef.current = null
-          }, 80)
-        },
         onRouteClick: (routeId) => {
           selectRouteRef.current(routeId)
-          focusRef.current(null)
+          popupRef.current?.remove()
+          popupPinnedRef.current = false
+          popupTargetRef.current = null
+          markPopupOpen(false)
         },
       })
       setMapError(null)
@@ -1345,8 +1340,6 @@ export function MapView({
       popupRef.current?.remove()
       destMarkerRef.current?.remove()
       destMarkerRef.current = null
-      routeCardMarkersRef.current.forEach((marker) => marker.remove())
-      routeCardMarkersRef.current = []
       map.remove()
       mapRef.current = null
       lastFitKey.current = null
@@ -1387,6 +1380,8 @@ export function MapView({
     setSourceData(SOURCES.checkpoints, checkpointData)
     popupRef.current?.remove()
     popupPinnedRef.current = false
+    popupTargetRef.current = null
+    markPopupOpen(false)
   }, [ready, checkpointData])
 
   useEffect(() => {
@@ -1438,26 +1433,13 @@ export function MapView({
   }, [ready, corridor?.raster?.id, styleEpoch])
 
   useEffect(() => {
-    const map = mapRef.current
-    if (!ready || !map) return
-    routeCardMarkersRef.current = syncRouteCardMarkers(
-      map,
-      routeCardMarkersRef.current,
-      routes,
-      recommendedRouteId,
-      selectedRouteId,
-      hiddenIds,
-      (routeId) => selectRouteRef.current(routeId),
-    )
-  }, [ready, styleEpoch, routes, recommendedRouteId, selectedRouteId, hiddenIds])
-
-  useEffect(() => {
     if (ready) setSourceData(WX_ARROW_SOURCE, arrowData)
   }, [ready, arrowData])
 
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
+    installLayers(map, theme, mode)
     applyOverlay(map, mode, heatHour)
   }, [ready, mode, heatHour, theme, styleEpoch])
 
@@ -1467,7 +1449,6 @@ export function MapView({
     const popup = popupForRef(popupTargetRef.current)
     if (!popup || !popupRef.current) return
     popupRef.current.setHTML(popup.html)
-    if (!popupExpandedRef.current) bindCollapsedPopupExpand(popupRef.current, popupTargetRef.current)
   }, [ready, heatHour, corridor])
 
   useEffect(() => {
@@ -1569,9 +1550,8 @@ export function MapView({
     if (!cp) return
 
     map.flyTo({ center: [cp.lon, cp.lat], zoom: Math.max(map.getZoom(), 6.5), duration: 700 })
-    popupExpandedRef.current = false
     popupTargetRef.current = focused
-    const popup = popupForRef(focused, false)
+    const popup = popupForRef(focused)
     if (popup) showPopup(map, popup.coordinates, popup.html, true)
     // heatHour is read for popup copy only; flying here on every slider tick would
     // yank the camera off the moving truck marker.
